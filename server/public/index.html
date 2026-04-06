@@ -102,19 +102,20 @@
             if (msg.type === 'pc_list')         msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen));
             if (msg.type === 'pc_connected')    addCards(msg.id, msg.hasCamera, msg.hasScreen);
             if (msg.type === 'pc_disconnected') setOffline(msg.id);
-            if (msg.type === 'frame')           updateFeed(cards, msg.id, msg.frame);
-            if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame);
+            if (msg.type === 'frame')           updateFeed(cards, msg.id, msg.frame, 'jpeg');
+            if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame, msg.fmt || 'jpeg');
         };
 
-        function updateFeed(store, id, frame) {
+        function updateFeed(store, id, frame, fmt) {
             const c = store[id];
             if (!c || !c.canvas) return;
+            const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
             const img = new Image();
             img.onload = () => {
                 c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
                 if (c.recording) c.recCtx.drawImage(img, 0, 0, c.recCanvas.width, c.recCanvas.height);
             };
-            img.src = 'data:image/jpeg;base64,' + frame;
+            img.src = `data:${mime};base64,` + frame;
             c.frameCount++;
             const now = Date.now();
             if (now - c.lastTime >= 1000) { c.fps.textContent = c.frameCount + ' fps'; c.frameCount = 0; c.lastTime = Date.now(); }

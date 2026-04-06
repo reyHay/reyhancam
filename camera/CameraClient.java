@@ -27,8 +27,8 @@ public class CameraClient {
 
     static final String SERVER_URL    = "wss://pccon.onrender.com";
     static final int    CAM_FPS       = 30;
-    static final int    SCREEN_FPS    = 15;
-    static final int    JPEG_QUALITY  = 90; // 0-100
+    static final int    SCREEN_FPS    = 20;
+    static final int    JPEG_QUALITY  = 92; // camera JPEG quality 0-100
     static final int    RECONNECT_SEC = 5;
 
     // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
@@ -210,9 +210,9 @@ public class CameraClient {
             try {
                 if (paused || ws == null || !ws.isOpen()) return;
                 BufferedImage img = robot.createScreenCapture(screen);
-                String b64 = toBase64(img);
+                String b64 = toBase64Png(img);
                 if (b64 == null) return;
-                ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
+                ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\",\"fmt\":\"png\"}");
             } catch (Exception e) {
                 System.err.println("[!] Screen error: " + e.getMessage());
             }
@@ -221,6 +221,7 @@ public class CameraClient {
         System.out.println("[*] Screen capture started");
     }
 
+    // JPEG for camera — smaller size, good for video
     static String toBase64(BufferedImage img) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -231,6 +232,16 @@ public class CameraClient {
             writer.setOutput(ImageIO.createImageOutputStream(baos));
             writer.write(null, new javax.imageio.IIOImage(img, null, null), param);
             writer.dispose();
+            byte[] bytes = baos.toByteArray();
+            return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
+        } catch (Exception e) { return null; }
+    }
+
+    // PNG for screen — lossless, text and UI stay perfectly sharp
+    static String toBase64Png(BufferedImage img) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, "png", baos);
             byte[] bytes = baos.toByteArray();
             return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
         } catch (Exception e) { return null; }
