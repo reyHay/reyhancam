@@ -16,32 +16,24 @@
         .card-header .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1e3a2f; color: #4caf50; }
         .card-header .badge.no-cam { background: #2a2a1e; color: #aaa; }
         .card-header .badge.offline { background: #3a1e1e; color: #f44336; }
-        .card-body { font-size: 0.75rem; color: #666; min-height: 48px; display: flex; align-items: center; }
+        .card-header .badge.screen { background: #1a2a3a; color: #00e5ff; }
         .card-body img { width: 100%; display: block; background: #000; min-height: 180px; }
         .card-footer { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px 8px; }
         .fps { font-size: 0.7rem; color: #555; }
-        .rec-btn {
-            font-size: 0.7rem; font-family: monospace; cursor: pointer;
-            padding: 3px 10px; border-radius: 10px; border: none;
-            background: #1e3a2f; color: #4caf50;
-        }
+        .rec-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1e3a2f; color: #4caf50; }
         .rec-btn.recording { background: #3a1e1e; color: #f44336; }
-        .dl-btn {
-            font-size: 0.7rem; font-family: monospace; cursor: pointer;
-            padding: 3px 10px; border-radius: 10px; border: none;
-            background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px;
-        }
+        .dl-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px; }
     </style>
 </head>
 <body>
     <h1>Dashboard</h1>
     <div id="status">Connecting...</div>
     <div id="grid"></div>
-
     <script>
-        const grid   = document.getElementById('grid');
-        const status = document.getElementById('status');
-        const cards  = {};
+        const grid    = document.getElementById('grid');
+        const status  = document.getElementById('status');
+        const cards   = {};
+        const screens = {};
 
         const ws = new WebSocket(`wss://${location.host}?role=dashboard`);
         ws.onopen  = () => { status.textContent = 'Connected'; status.style.color = '#4caf50'; };
@@ -49,91 +41,84 @@
 
         ws.onmessage = (e) => {
             const msg = JSON.parse(e.data);
-            if (msg.type === 'pc_list')       msg.pcs.forEach(pc => addCard(pc.id, pc.hasCamera));
-            if (msg.type === 'pc_connected')  addCard(msg.id, msg.hasCamera);
-            if (msg.type === 'pc_disconnected') setOffline(msg.id);
-            if (msg.type === 'frame') {
-                const c = cards[msg.id];
-                if (!c || !c.img) return;
-                const dataUrl = 'data:image/jpeg;base64,' + msg.frame;
-                c.img.src = dataUrl;
-
-                // recording: draw frame onto canvas and capture to MediaRecorder
-                if (c.recording && c.canvas) {
-                    const img = new Image();
-                    img.onload = () => {
-                        c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
-                    };
-                    img.src = dataUrl;
-                }
-
-                c.frameCount++;
-                const now = Date.now();
-                if (now - c.lastTime >= 1000) {
-                    c.fps.textContent = c.frameCount + ' fps';
-                    c.frameCount = 0;
-                    c.lastTime = now;
-                }
-            }
+            if (msg.type === 'pc_list')          msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen));
+            if (msg.type === 'pc_connected')     addCards(msg.id, msg.hasCamera, msg.hasScreen);
+            if (msg.type === 'pc_disconnected')  setOffline(msg.id);
+            if (msg.type === 'frame')            updateFeed(cards, msg.id, msg.frame);
+            if (msg.type === 'screen_frame')     updateFeed(screens, msg.id, msg.frame);
         };
 
-        function addCard(id, hasCamera) {
-            if (cards[id]) {
-                cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam');
-                cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera';
-                return;
+        function updateFeed(store, id, frame) {
+            const c = store[id];
+            if (!c || !c.img) return;
+            const dataUrl = 'data:image/jpeg;base64,' + frame;
+            c.img.src = dataUrl;
+            if (c.recording && c.canvas) {
+                const img = new Image();
+                img.onload = () => c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
+                img.src = dataUrl;
             }
+            c.frameCount++;
+            const now = Date.now();
+            if (now - c.lastTime >= 1000) { c.fps.textContent = c.frameCount + ' fps'; c.frameCount = 0; c.lastTime = now; }
+        }
+
+        function addCards(id, hasCamera, hasScreen) {
+            if (!cards[id])   addFeedCard(id, 'camera', hasCamera);
+            else { cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam'); cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera'; }
+            if (hasScreen && !screens[id]) addFeedCard(id, 'screen', true);
+        }
+
+        function addFeedCard(id, type, active) {
+            const store  = type === 'camera' ? cards : screens;
+            const cardId = type === 'camera' ? id : id + '-screen';
+            const label  = type === 'camera' ? (active ? 'camera on' : 'no camera') : 'screen';
+            const badgeCls = type === 'screen' ? 'badge screen' : ('badge' + (active ? '' : ' no-cam'));
+            const canvasW  = type === 'screen' ? 1280 : 640;
+            const canvasH  = type === 'screen' ? 720  : 480;
 
             const card = document.createElement('div');
             card.className = 'card';
             card.innerHTML = `
                 <div class="card-header">
-                    <span class="name">${id}</span>
-                    <span class="badge ${hasCamera ? '' : 'no-cam'}">${hasCamera ? 'camera on' : 'no camera'}</span>
+                    <span class="name">${id} ${type === 'screen' ? '🖥' : '📷'}</span>
+                    <span class="${badgeCls}">${label}</span>
                 </div>
-                <div class="card-body" id="body-${id}">
-                    ${hasCamera ? `<img id="img-${id}" alt="${id}"/>` : `<span>No camera detected on this PC</span>`}
+                <div class="card-body">
+                    ${active ? `<img id="img-${cardId}" alt="${cardId}"/>` : `<span>No ${type} detected</span>`}
                 </div>
-                ${hasCamera ? `
-                <div class="card-footer">
-                    <span class="fps" id="fps-${id}">-- fps</span>
+                ${active ? `<div class="card-footer">
+                    <span class="fps" id="fps-${cardId}">-- fps</span>
                     <div>
-                        <button class="rec-btn" id="rec-${id}">⏺ Record</button>
-                        <button class="dl-btn" id="dl-${id}">⬇ Download</button>
+                        <button class="rec-btn" id="rec-${cardId}">⏺ Record</button>
+                        <button class="dl-btn"  id="dl-${cardId}">⬇ Download</button>
                     </div>
                 </div>` : ''}
             `;
             grid.appendChild(card);
 
             const entry = {
-                card,
-                badge:      card.querySelector('.badge'),
-                img:        card.querySelector(`#img-${id}`),
-                fps:        card.querySelector(`#fps-${id}`),
-                frameCount: 0,
-                lastTime:   Date.now(),
-                recording:  false,
-                canvas:     null,
-                ctx:        null,
-                recorder:   null,
-                chunks:     [],
+                card, type,
+                badge:      card.querySelector('.' + badgeCls.split(' ')[0]),
+                img:        active ? card.querySelector(`#img-${cardId}`) : null,
+                fps:        active ? card.querySelector(`#fps-${cardId}`) : null,
+                frameCount: 0, lastTime: Date.now(),
+                recording: false, canvas: null, ctx: null, recorder: null, chunks: [],
             };
-            cards[id] = entry;
+            store[id] = entry;
 
-            if (!hasCamera) return;
+            if (!active) return;
 
-            // set up offscreen canvas for recording
             entry.canvas = document.createElement('canvas');
-            entry.canvas.width  = 640;
-            entry.canvas.height = 480;
+            entry.canvas.width  = canvasW;
+            entry.canvas.height = canvasH;
             entry.ctx = entry.canvas.getContext('2d');
 
-            const recBtn = card.querySelector(`#rec-${id}`);
-            const dlBtn  = card.querySelector(`#dl-${id}`);
+            const recBtn = card.querySelector(`#rec-${cardId}`);
+            const dlBtn  = card.querySelector(`#dl-${cardId}`);
 
             recBtn.addEventListener('click', () => {
                 if (!entry.recording) {
-                    // start
                     entry.chunks = [];
                     const stream = entry.canvas.captureStream(30);
                     entry.recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
@@ -142,35 +127,28 @@
                         const blob = new Blob(entry.chunks, { type: 'video/webm' });
                         const url  = URL.createObjectURL(blob);
                         dlBtn.style.display = 'inline-block';
-                        dlBtn.onclick = () => {
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `${id}-${Date.now()}.webm`;
-                            a.click();
-                        };
+                        dlBtn.onclick = () => { const a = document.createElement('a'); a.href = url; a.download = `${cardId}-${Date.now()}.webm`; a.click(); };
                     };
                     entry.recorder.start();
                     entry.recording = true;
-                    recBtn.textContent = '⏹ Stop';
-                    recBtn.className = 'rec-btn recording';
+                    recBtn.textContent = '⏹ Stop'; recBtn.className = 'rec-btn recording';
                     dlBtn.style.display = 'none';
                 } else {
-                    // stop
                     entry.recorder.stop();
                     entry.recording = false;
-                    recBtn.textContent = '⏺ Record';
-                    recBtn.className = 'rec-btn';
+                    recBtn.textContent = '⏺ Record'; recBtn.className = 'rec-btn';
                 }
             });
         }
 
         function setOffline(id) {
-            const c = cards[id];
-            if (!c) return;
-            c.badge.className = 'badge offline';
-            c.badge.textContent = 'offline';
-            if (c.fps) c.fps.textContent = '';
-            if (c.recording && c.recorder) { c.recorder.stop(); c.recording = false; }
+            [cards, screens].forEach(store => {
+                const c = store[id];
+                if (!c) return;
+                if (c.badge) { c.badge.className = 'badge offline'; c.badge.textContent = 'offline'; }
+                if (c.fps) c.fps.textContent = '';
+                if (c.recording && c.recorder) { c.recorder.stop(); c.recording = false; }
+            });
         }
     </script>
 </body>

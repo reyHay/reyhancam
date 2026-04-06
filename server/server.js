@@ -46,14 +46,19 @@ wss.on('connection', (ws, req) => {
 
             if (msg.type === 'hello') {
                 pcId = msg.id;
-                pcs.set(pcId, { hasCamera: msg.hasCamera, lastSeen: Date.now() });
-                broadcast(dashboards, { type: 'pc_connected', id: pcId, hasCamera: msg.hasCamera });
-                console.log(`[+] PC connected: ${pcId} | camera: ${msg.hasCamera}`);
+                pcs.set(pcId, { hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false, lastSeen: Date.now() });
+                broadcast(dashboards, { type: 'pc_connected', id: pcId, hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false });
+                console.log(`[+] PC connected: ${pcId} | camera: ${msg.hasCamera} | screen: ${msg.hasScreen}`);
             }
 
             if (msg.type === 'frame' && msg.id) {
                 pcs.set(msg.id, { ...pcs.get(msg.id), lastSeen: Date.now() });
                 broadcast(dashboards, { type: 'frame', id: msg.id, frame: msg.frame });
+            }
+
+            if (msg.type === 'screen_frame' && msg.id) {
+                pcs.set(msg.id, { ...pcs.get(msg.id), lastSeen: Date.now() });
+                broadcast(dashboards, { type: 'screen_frame', id: msg.id, frame: msg.frame });
             }
 
         } catch (e) {
