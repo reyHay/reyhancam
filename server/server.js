@@ -56,10 +56,10 @@ wss.on('connection', (ws, req) => {
 
             if (msg.type === 'hello') {
                 pcId = msg.id;
-                pcs.set(pcId, { hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false, lastSeen: Date.now() });
+                pcs.set(pcId, { hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false, version: msg.version || '?', lastSeen: Date.now() });
                 pcSockets.set(pcId, ws);
-                broadcast(dashboards, { type: 'pc_connected', id: pcId, hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false });
-                console.log(`[+] PC connected: ${pcId} | camera: ${msg.hasCamera} | screen: ${msg.hasScreen}`);
+                broadcast(dashboards, { type: 'pc_connected', id: pcId, hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false, version: msg.version || '?' });
+                console.log(`[+] PC connected: ${pcId} | camera: ${msg.hasCamera} | screen: ${msg.hasScreen} | v${msg.version}`);
             }
 
             if (msg.type === 'frame' && msg.id) {

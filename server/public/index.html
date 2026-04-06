@@ -100,8 +100,8 @@
 
         ws.onmessage = (e) => {
             const msg = JSON.parse(e.data);
-            if (msg.type === 'pc_list')         msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen));
-            if (msg.type === 'pc_connected')    addCards(msg.id, msg.hasCamera, msg.hasScreen);
+            if (msg.type === 'pc_list')         msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen, pc.version));
+            if (msg.type === 'pc_connected')    addCards(msg.id, msg.hasCamera, msg.hasScreen, msg.version);
             if (msg.type === 'pc_disconnected') setOffline(msg.id);
             if (msg.type === 'frame')           updateFeed(cards, msg.id, msg.frame, 'jpeg');
             if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame, msg.fmt || 'jpeg');
@@ -128,13 +128,13 @@
             if (now - c.lastTime >= 1000) { c.fps.textContent = c.frameCount + ' fps'; c.frameCount = 0; c.lastTime = Date.now(); }
         }
 
-        function addCards(id, hasCamera, hasScreen) {
-            if (!cards[id])  addFeedCard(id, 'camera', hasCamera);
+        function addCards(id, hasCamera, hasScreen, version) {
+            if (!cards[id])  addFeedCard(id, 'camera', hasCamera, version);
             else { cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera'; cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam'); }
-            if (hasScreen && !screens[id]) addFeedCard(id, 'screen', true);
+            if (hasScreen && !screens[id]) addFeedCard(id, 'screen', true, version);
         }
 
-        function addFeedCard(id, type, active) {
+        function addFeedCard(id, type, active, version) {
             const store    = type === 'camera' ? cards : screens;
             const cardId   = type === 'camera' ? id : id + '-screen';
             const suffix   = type === 'screen' ? '🖥' : '📷';
@@ -147,6 +147,7 @@
             card.innerHTML = `
                 <div class="card-header">
                     <span class="name" data-pcid="${id}" data-suffix="${suffix}">${displayName} ${suffix}</span>
+                    ${type === 'camera' ? `<span style="font-size:0.65rem;color:#555">v${version || '?'}</span>` : ''}
                     <span class="${badgeCls}">${label}</span>
                     ${type === 'camera' ? `<button class="update-btn" id="upd-${id}">↑ Update</button><button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
                 </div>

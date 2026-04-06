@@ -276,7 +276,7 @@ public class CameraClient {
             ws.connectBlocking();
             if (!ws.isOpen()) { scheduleReconnect(); return; }
             System.out.println("[+] Connected.");
-            ws.send("{\"type\":\"hello\",\"id\":\"" + pcId + "\",\"hasCamera\":" + hasCamera + ",\"hasScreen\":true}");
+            ws.send("{\"type\":\"hello\",\"id\":\"" + pcId + "\",\"hasCamera\":" + hasCamera + ",\"hasScreen\":true,\"version\":\"" + VERSION + "\"}");
         } catch (Exception e) {
             System.err.println("[!] Connection error: " + e.getMessage());
             scheduleReconnect();
