@@ -16,7 +16,7 @@ import org.java_websocket.handshake.ServerHandshake;
 
 public class CameraClient {
 
-    static final String SERVER_URL    = "wss://your-app.onrender.com";
+    static final String SERVER_URL    = "wss://pccon.onrender.com";
     static final int    FPS           = 10;
     static final int    RECONNECT_SEC = 5;
 
