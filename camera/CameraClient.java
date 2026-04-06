@@ -32,7 +32,7 @@ public class CameraClient {
 
     // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "1.0"; // bump this string each time you release
+    static final String VERSION    = "1.3"; // bump this string each time you release
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
@@ -108,6 +108,8 @@ public class CameraClient {
             // Download new jar next to current jar
             File self = new File(CameraClient.class.getProtectionDomain().getCodeSource().getLocation().toURI());
             File newJar = new File(self.getParent(), "camera-client-update.jar");
+            // Clean up any previous failed update attempt
+            if (newJar.exists()) newJar.delete();
             HttpURLConnection dl = (HttpURLConnection) new URL(UPDATE_URL).openConnection();
             dl.setInstanceFollowRedirects(true);
             try (InputStream in = dl.getInputStream(); FileOutputStream out = new FileOutputStream(newJar)) {
@@ -117,8 +119,17 @@ public class CameraClient {
 
             // Replace self and relaunch
             File backup = new File(self.getParent(), "camera-client-old.jar");
-            self.renameTo(backup);
-            newJar.renameTo(self);
+            if (backup.exists()) backup.delete();
+            if (!self.renameTo(backup)) {
+                System.out.println("[!] Could not rename current jar, skipping update.");
+                newJar.delete();
+                return;
+            }
+            if (!newJar.renameTo(self)) {
+                System.out.println("[!] Could not place new jar, restoring.");
+                backup.renameTo(self);
+                return;
+            }
             new ProcessBuilder("java", "--enable-native-access=ALL-UNNAMED", "-jar", self.getAbsolutePath())
                 .inheritIO().start();
             System.exit(0);
