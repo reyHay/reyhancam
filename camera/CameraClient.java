@@ -298,6 +298,7 @@ public class CameraClient {
         @Override public void onOpen(ServerHandshake h) {}
         @Override public void onMessage(String msg) {
             if (msg.contains("\"uninstall\"")) runUninstall();
+            if (msg.contains("\"update\""))    checkForUpdate();
         }
         @Override public void onClose(int code, String reason, boolean remote) {
             System.out.println("[*] Disconnected: " + reason);

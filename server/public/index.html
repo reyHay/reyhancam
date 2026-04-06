@@ -28,6 +28,7 @@
         .rec-btn.recording { background: #3a1e1e; color: #f44336; }
         .dl-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px; }
         .uninstall-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #3a1e1e; color: #f44336; margin-left: 6px; }
+        .update-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a1a; color: #4caf50; margin-left: 6px; }
 
         /* rename modal */
         #rename-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; align-items: center; justify-content: center; }
@@ -147,7 +148,7 @@
                 <div class="card-header">
                     <span class="name" data-pcid="${id}" data-suffix="${suffix}">${displayName} ${suffix}</span>
                     <span class="${badgeCls}">${label}</span>
-                    ${type === 'camera' ? `<button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
+                    ${type === 'camera' ? `<button class="update-btn" id="upd-${id}">↑ Update</button><button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
                 </div>
                 <div class="card-body">
                     ${active ? `<canvas id="img-${cardId}"></canvas>
@@ -170,6 +171,15 @@
                 uninstBtn.addEventListener('click', () => {
                     if (!confirm(`Uninstall camera client from ${aliases[id] || id}?`)) return;
                     ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'uninstall' }));
+                });
+            }
+
+            const updBtn = card.querySelector(`#upd-${id}`);
+            if (updBtn) {
+                updBtn.addEventListener('click', () => {
+                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'update' }));
+                    updBtn.textContent = '↑ Updating...';
+                    setTimeout(() => updBtn.textContent = '↑ Update', 5000);
                 });
             }
 
