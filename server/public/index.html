@@ -112,8 +112,14 @@
             const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
             const img = new Image();
             img.onload = () => {
-                c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
-                if (c.recording) c.recCtx.drawImage(img, 0, 0, c.recCanvas.width, c.recCanvas.height);
+                // auto-resize canvas to match actual frame on first frame
+                if (c.canvas.width !== img.naturalWidth || c.canvas.height !== img.naturalHeight) {
+                    c.canvas.width  = img.naturalWidth;
+                    c.canvas.height = img.naturalHeight;
+                    if (c.recCanvas) { c.recCanvas.width = img.naturalWidth; c.recCanvas.height = img.naturalHeight; }
+                }
+                c.ctx.drawImage(img, 0, 0);
+                if (c.recording) c.recCtx.drawImage(img, 0, 0);
             };
             img.src = `data:${mime};base64,` + frame;
             c.frameCount++;
@@ -179,10 +185,9 @@
 
             if (!active) return;
 
-            // size the display canvas
-            const isScreen = type === 'screen';
-            entry.canvas.width  = isScreen ? 1920 : 1280;
-            entry.canvas.height = isScreen ? 1080 : 720;
+            // canvas starts small, resizes to actual frame dimensions on first frame
+            entry.canvas.width  = 1280;
+            entry.canvas.height = 720;
             entry.ctx = entry.canvas.getContext('2d');
 
             const fsBtn = card.querySelector('.fullscreen-btn');
