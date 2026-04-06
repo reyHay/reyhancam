@@ -11,29 +11,122 @@
         #status { font-size: 0.75rem; color: #888; margin-bottom: 16px; }
         #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
         .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; overflow: hidden; }
-        .card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #111; font-size: 0.8rem; }
-        .card-header .name { color: #00e5ff; }
-        .card-header .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1e3a2f; color: #4caf50; }
+        .card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #111; font-size: 0.8rem; gap: 6px; }
+        .card-header .name { color: #00e5ff; cursor: pointer; }
+        .card-header .name:hover { text-decoration: underline; }
+        .card-header .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1e3a2f; color: #4caf50; white-space: nowrap; }
         .card-header .badge.no-cam { background: #2a2a1e; color: #aaa; }
         .card-header .badge.offline { background: #3a1e1e; color: #f44336; }
         .card-header .badge.screen { background: #1a2a3a; color: #00e5ff; }
-        .card-body img { width: 100%; display: block; background: #000; min-height: 180px; }
+        .card-body { position: relative; }
+        .card-body img { width: 100%; display: block; background: #000; min-height: 180px; cursor: pointer; }
+        .fullscreen-btn { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.6); border: none; color: #fff; font-size: 0.75rem; padding: 3px 7px; border-radius: 6px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+        .card-body:hover .fullscreen-btn { opacity: 1; }
         .card-footer { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px 8px; }
         .fps { font-size: 0.7rem; color: #555; }
         .rec-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1e3a2f; color: #4caf50; }
         .rec-btn.recording { background: #3a1e1e; color: #f44336; }
         .dl-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px; }
+
+        /* fullscreen overlay */
+        #overlay { display: none; position: fixed; inset: 0; background: #000; z-index: 1000; flex-direction: column; }
+        #overlay.active { display: flex; }
+        #overlay-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #111; font-size: 0.85rem; }
+        #overlay-title { color: #00e5ff; }
+        #overlay-close { background: none; border: none; color: #aaa; font-size: 1.2rem; cursor: pointer; }
+        #overlay-img { flex: 1; object-fit: contain; width: 100%; }
+
+        /* rename modal */
+        #rename-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; align-items: center; justify-content: center; }
+        #rename-modal.active { display: flex; }
+        #rename-box { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-width: 260px; }
+        #rename-box label { font-size: 0.8rem; color: #888; }
+        #rename-input { background: #111; border: 1px solid #333; color: #e0e0e0; font-family: monospace; font-size: 0.9rem; padding: 6px 10px; border-radius: 6px; outline: none; }
+        #rename-input:focus { border-color: #00e5ff; }
+        #rename-actions { display: flex; gap: 8px; justify-content: flex-end; }
+        .modal-btn { font-family: monospace; font-size: 0.75rem; padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer; }
+        #rename-ok  { background: #1e3a2f; color: #4caf50; }
+        #rename-cancel { background: #2a2a2a; color: #aaa; }
     </style>
 </head>
 <body>
     <h1>Dashboard</h1>
     <div id="status">Connecting...</div>
     <div id="grid"></div>
+
+    <!-- fullscreen overlay -->
+    <div id="overlay">
+        <div id="overlay-header">
+            <span id="overlay-title"></span>
+            <button id="overlay-close">✕</button>
+        </div>
+        <img id="overlay-img" alt="fullscreen"/>
+    </div>
+
+    <!-- rename modal -->
+    <div id="rename-modal">
+        <div id="rename-box">
+            <label>Rename PC</label>
+            <input id="rename-input" type="text"/>
+            <div id="rename-actions">
+                <button class="modal-btn" id="rename-cancel">Cancel</button>
+                <button class="modal-btn" id="rename-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const grid    = document.getElementById('grid');
         const status  = document.getElementById('status');
         const cards   = {};
         const screens = {};
+        const aliases = JSON.parse(localStorage.getItem('pc-aliases') || '{}');
+
+        // fullscreen overlay
+        const overlay     = document.getElementById('overlay');
+        const overlayImg  = document.getElementById('overlay-img');
+        const overlayTitle= document.getElementById('overlay-title');
+        document.getElementById('overlay-close').onclick = () => overlay.classList.remove('active');
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.classList.remove('active'); });
+
+        function openFullscreen(id, type) {
+            const store = type === 'screen' ? screens : cards;
+            const c = store[id];
+            if (!c || !c.img) return;
+            overlayImg.src = c.img.src;
+            overlayTitle.textContent = (aliases[id] || id) + (type === 'screen' ? ' 🖥' : ' 📷');
+            overlay.classList.add('active');
+            // keep updating while open
+            c.onFullscreenFrame = (src) => { if (overlay.classList.contains('active')) overlayImg.src = src; };
+        }
+
+        // rename modal
+        const renameModal = document.getElementById('rename-modal');
+        const renameInput = document.getElementById('rename-input');
+        let renamingId = null;
+
+        function openRename(id) {
+            renamingId = id;
+            renameInput.value = aliases[id] || id;
+            renameModal.classList.add('active');
+            renameInput.focus();
+            renameInput.select();
+        }
+        function applyRename() {
+            if (!renamingId) return;
+            const val = renameInput.value.trim();
+            if (val) {
+                aliases[renamingId] = val;
+                localStorage.setItem('pc-aliases', JSON.stringify(aliases));
+                // update all name spans for this id
+                document.querySelectorAll(`[data-pcid="${renamingId}"]`).forEach(el => el.textContent = val + ' ' + el.dataset.suffix);
+            }
+            renameModal.classList.remove('active');
+            renamingId = null;
+        }
+        document.getElementById('rename-ok').onclick = applyRename;
+        document.getElementById('rename-cancel').onclick = () => { renameModal.classList.remove('active'); renamingId = null; };
+        renameInput.addEventListener('keydown', e => { if (e.key === 'Enter') applyRename(); if (e.key === 'Escape') document.getElementById('rename-cancel').click(); });
 
         const ws = new WebSocket(`wss://${location.host}?role=dashboard`);
         ws.onopen  = () => { status.textContent = 'Connected'; status.style.color = '#4caf50'; };
@@ -41,11 +134,11 @@
 
         ws.onmessage = (e) => {
             const msg = JSON.parse(e.data);
-            if (msg.type === 'pc_list')          msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen));
-            if (msg.type === 'pc_connected')     addCards(msg.id, msg.hasCamera, msg.hasScreen);
-            if (msg.type === 'pc_disconnected')  setOffline(msg.id);
-            if (msg.type === 'frame')            updateFeed(cards, msg.id, msg.frame);
-            if (msg.type === 'screen_frame')     updateFeed(screens, msg.id, msg.frame);
+            if (msg.type === 'pc_list')         msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen));
+            if (msg.type === 'pc_connected')    addCards(msg.id, msg.hasCamera, msg.hasScreen);
+            if (msg.type === 'pc_disconnected') setOffline(msg.id);
+            if (msg.type === 'frame')           updateFeed(cards, msg.id, msg.frame);
+            if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame);
         };
 
         function updateFeed(store, id, frame) {
@@ -53,6 +146,7 @@
             if (!c || !c.img) return;
             const dataUrl = 'data:image/jpeg;base64,' + frame;
             c.img.src = dataUrl;
+            if (c.onFullscreenFrame) c.onFullscreenFrame(dataUrl);
             if (c.recording && c.canvas) {
                 const img = new Image();
                 img.onload = () => c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
@@ -64,28 +158,29 @@
         }
 
         function addCards(id, hasCamera, hasScreen) {
-            if (!cards[id])   addFeedCard(id, 'camera', hasCamera);
-            else { cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam'); cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera'; }
+            if (!cards[id])  addFeedCard(id, 'camera', hasCamera);
+            else { cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera'; cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam'); }
             if (hasScreen && !screens[id]) addFeedCard(id, 'screen', true);
         }
 
         function addFeedCard(id, type, active) {
-            const store  = type === 'camera' ? cards : screens;
-            const cardId = type === 'camera' ? id : id + '-screen';
-            const label  = type === 'camera' ? (active ? 'camera on' : 'no camera') : 'screen';
+            const store    = type === 'camera' ? cards : screens;
+            const cardId   = type === 'camera' ? id : id + '-screen';
+            const suffix   = type === 'screen' ? '🖥' : '📷';
+            const label    = type === 'screen' ? 'screen' : (active ? 'camera on' : 'no camera');
             const badgeCls = type === 'screen' ? 'badge screen' : ('badge' + (active ? '' : ' no-cam'));
-            const canvasW  = type === 'screen' ? 1280 : 640;
-            const canvasH  = type === 'screen' ? 720  : 480;
+            const displayName = aliases[id] || id;
 
             const card = document.createElement('div');
             card.className = 'card';
             card.innerHTML = `
                 <div class="card-header">
-                    <span class="name">${id} ${type === 'screen' ? '🖥' : '📷'}</span>
+                    <span class="name" data-pcid="${id}" data-suffix="${suffix}">${displayName} ${suffix}</span>
                     <span class="${badgeCls}">${label}</span>
                 </div>
                 <div class="card-body">
-                    ${active ? `<img id="img-${cardId}" alt="${cardId}"/>` : `<span>No ${type} detected</span>`}
+                    ${active ? `<img id="img-${cardId}" alt="${cardId}"/>
+                    <button class="fullscreen-btn">⛶ Fullscreen</button>` : `<span style="padding:12px;font-size:0.75rem;color:#666">No ${type} detected</span>`}
                 </div>
                 ${active ? `<div class="card-footer">
                     <span class="fps" id="fps-${cardId}">-- fps</span>
@@ -97,21 +192,29 @@
             `;
             grid.appendChild(card);
 
+            // rename on name click
+            card.querySelector('.name').addEventListener('click', () => openRename(id));
+
             const entry = {
-                card, type,
-                badge:      card.querySelector('.' + badgeCls.split(' ')[0]),
-                img:        active ? card.querySelector(`#img-${cardId}`) : null,
-                fps:        active ? card.querySelector(`#fps-${cardId}`) : null,
+                card, badge: card.querySelector('.' + badgeCls.split(' ')[0]),
+                img: active ? card.querySelector(`#img-${cardId}`) : null,
+                fps: active ? card.querySelector(`#fps-${cardId}`) : null,
                 frameCount: 0, lastTime: Date.now(),
                 recording: false, canvas: null, ctx: null, recorder: null, chunks: [],
+                onFullscreenFrame: null,
             };
             store[id] = entry;
 
             if (!active) return;
 
+            // fullscreen button
+            card.querySelector('.fullscreen-btn').addEventListener('click', () => openFullscreen(id, type));
+            entry.img.addEventListener('dblclick', () => openFullscreen(id, type));
+
+            // recording canvas
             entry.canvas = document.createElement('canvas');
-            entry.canvas.width  = canvasW;
-            entry.canvas.height = canvasH;
+            entry.canvas.width  = type === 'screen' ? 1280 : 640;
+            entry.canvas.height = type === 'screen' ? 720  : 480;
             entry.ctx = entry.canvas.getContext('2d');
 
             const recBtn = card.querySelector(`#rec-${cardId}`);
