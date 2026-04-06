@@ -104,7 +104,7 @@
             if (msg.type === 'pc_connected')    addCards(msg.id, msg.hasCamera, msg.hasScreen, msg.version);
             if (msg.type === 'pc_disconnected') setOffline(msg.id);
             if (msg.type === 'frame')           updateFeed(cards, msg.id, msg.frame, 'jpeg');
-            if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame, msg.fmt || 'jpeg');
+            if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame, 'jpeg');
         };
 
         function updateFeed(store, id, frame, fmt) {
