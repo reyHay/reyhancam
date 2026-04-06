@@ -75,6 +75,23 @@ public class CameraClient {
         Thread.currentThread().join();
     }
 
+    static void runUninstall() {
+        System.out.println("[*] Uninstall command received.");
+        try {
+            String installDir = System.getenv("ProgramData") + "\\CameraService";
+            // Remove startup registry entry
+            new ProcessBuilder("reg", "delete",
+                "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "/v", "CameraService", "/f").start().waitFor();
+            // Delete install folder
+            new ProcessBuilder("cmd", "/c", "rmdir /s /q \"" + installDir + "\"").start().waitFor();
+            System.out.println("[*] Uninstalled.");
+        } catch (Exception e) {
+            System.err.println("[!] Uninstall error: " + e.getMessage());
+        }
+        System.exit(0);
+    }
+
     static void checkForUpdate() {
         try {
             // Check version.txt in the release to compare
@@ -194,7 +211,9 @@ public class CameraClient {
     static class CameraWebSocket extends WebSocketClient {
         CameraWebSocket(URI uri) { super(uri); }
         @Override public void onOpen(ServerHandshake h) {}
-        @Override public void onMessage(String msg) {}
+        @Override public void onMessage(String msg) {
+            if (msg.contains("\"uninstall\"")) runUninstall();
+        }
         @Override public void onClose(int code, String reason, boolean remote) {
             System.out.println("[*] Disconnected: " + reason);
             scheduleReconnect();

