@@ -10,46 +10,27 @@
         h1 { font-size: 1.1rem; color: #00e5ff; margin-bottom: 4px; }
         #status { font-size: 0.75rem; color: #888; margin-bottom: 16px; }
         #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-
-        .card {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
-            border-radius: 6px;
-            overflow: hidden;
-        }
-        .card-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            background: #111;
-            font-size: 0.8rem;
-        }
+        .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; overflow: hidden; }
+        .card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #111; font-size: 0.8rem; }
         .card-header .name { color: #00e5ff; }
-        .card-header .badge {
-            font-size: 0.7rem;
-            padding: 2px 8px;
-            border-radius: 10px;
-            background: #1e3a2f;
-            color: #4caf50;
-        }
+        .card-header .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1e3a2f; color: #4caf50; }
         .card-header .badge.no-cam { background: #2a2a1e; color: #aaa; }
         .card-header .badge.offline { background: #3a1e1e; color: #f44336; }
-        .card-body {
-            padding: 12px;
-            font-size: 0.75rem;
-            color: #666;
-            min-height: 48px;
-            display: flex;
-            align-items: center;
-        }
-        .card-body img {
-            width: 100%;
-            display: block;
-            background: #000;
-            min-height: 180px;
-        }
+        .card-body { font-size: 0.75rem; color: #666; min-height: 48px; display: flex; align-items: center; }
+        .card-body img { width: 100%; display: block; background: #000; min-height: 180px; }
+        .card-footer { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px 8px; }
         .fps { font-size: 0.7rem; color: #555; }
+        .rec-btn {
+            font-size: 0.7rem; font-family: monospace; cursor: pointer;
+            padding: 3px 10px; border-radius: 10px; border: none;
+            background: #1e3a2f; color: #4caf50;
+        }
+        .rec-btn.recording { background: #3a1e1e; color: #f44336; }
+        .dl-btn {
+            font-size: 0.7rem; font-family: monospace; cursor: pointer;
+            padding: 3px 10px; border-radius: 10px; border: none;
+            background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px;
+        }
     </style>
 </head>
 <body>
@@ -63,32 +44,29 @@
         const cards  = {};
 
         const ws = new WebSocket(`wss://${location.host}?role=dashboard`);
-
-        ws.onopen = () => {
-            status.textContent = 'Connected';
-            status.style.color = '#4caf50';
-        };
-        ws.onclose = () => {
-            status.textContent = 'Disconnected — reload to reconnect';
-            status.style.color = '#f44336';
-        };
+        ws.onopen  = () => { status.textContent = 'Connected'; status.style.color = '#4caf50'; };
+        ws.onclose = () => { status.textContent = 'Disconnected — reload to reconnect'; status.style.color = '#f44336'; };
 
         ws.onmessage = (e) => {
             const msg = JSON.parse(e.data);
-
-            if (msg.type === 'pc_list') {
-                msg.pcs.forEach(pc => addCard(pc.id, pc.hasCamera));
-            }
-            if (msg.type === 'pc_connected') {
-                addCard(msg.id, msg.hasCamera);
-            }
-            if (msg.type === 'pc_disconnected') {
-                setOffline(msg.id);
-            }
+            if (msg.type === 'pc_list')       msg.pcs.forEach(pc => addCard(pc.id, pc.hasCamera));
+            if (msg.type === 'pc_connected')  addCard(msg.id, msg.hasCamera);
+            if (msg.type === 'pc_disconnected') setOffline(msg.id);
             if (msg.type === 'frame') {
                 const c = cards[msg.id];
                 if (!c || !c.img) return;
-                c.img.src = 'data:image/jpeg;base64,' + msg.frame;
+                const dataUrl = 'data:image/jpeg;base64,' + msg.frame;
+                c.img.src = dataUrl;
+
+                // recording: draw frame onto canvas and capture to MediaRecorder
+                if (c.recording && c.canvas) {
+                    const img = new Image();
+                    img.onload = () => {
+                        c.ctx.drawImage(img, 0, 0, c.canvas.width, c.canvas.height);
+                    };
+                    img.src = dataUrl;
+                }
+
                 c.frameCount++;
                 const now = Date.now();
                 if (now - c.lastTime >= 1000) {
@@ -101,7 +79,6 @@
 
         function addCard(id, hasCamera) {
             if (cards[id]) {
-                // re-activate if it was offline
                 cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam');
                 cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera';
                 return;
@@ -115,22 +92,76 @@
                     <span class="badge ${hasCamera ? '' : 'no-cam'}">${hasCamera ? 'camera on' : 'no camera'}</span>
                 </div>
                 <div class="card-body" id="body-${id}">
-                    ${hasCamera
-                        ? `<img id="img-${id}" alt="${id}"/>`
-                        : `<span>No camera detected on this PC</span>`}
+                    ${hasCamera ? `<img id="img-${id}" alt="${id}"/>` : `<span>No camera detected on this PC</span>`}
                 </div>
-                ${hasCamera ? `<div style="padding:4px 12px 8px"><span class="fps" id="fps-${id}">-- fps</span></div>` : ''}
+                ${hasCamera ? `
+                <div class="card-footer">
+                    <span class="fps" id="fps-${id}">-- fps</span>
+                    <div>
+                        <button class="rec-btn" id="rec-${id}">⏺ Record</button>
+                        <button class="dl-btn" id="dl-${id}">⬇ Download</button>
+                    </div>
+                </div>` : ''}
             `;
             grid.appendChild(card);
 
-            cards[id] = {
+            const entry = {
                 card,
                 badge:      card.querySelector('.badge'),
                 img:        card.querySelector(`#img-${id}`),
                 fps:        card.querySelector(`#fps-${id}`),
                 frameCount: 0,
                 lastTime:   Date.now(),
+                recording:  false,
+                canvas:     null,
+                ctx:        null,
+                recorder:   null,
+                chunks:     [],
             };
+            cards[id] = entry;
+
+            if (!hasCamera) return;
+
+            // set up offscreen canvas for recording
+            entry.canvas = document.createElement('canvas');
+            entry.canvas.width  = 640;
+            entry.canvas.height = 480;
+            entry.ctx = entry.canvas.getContext('2d');
+
+            const recBtn = card.querySelector(`#rec-${id}`);
+            const dlBtn  = card.querySelector(`#dl-${id}`);
+
+            recBtn.addEventListener('click', () => {
+                if (!entry.recording) {
+                    // start
+                    entry.chunks = [];
+                    const stream = entry.canvas.captureStream(30);
+                    entry.recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                    entry.recorder.ondataavailable = ev => { if (ev.data.size > 0) entry.chunks.push(ev.data); };
+                    entry.recorder.onstop = () => {
+                        const blob = new Blob(entry.chunks, { type: 'video/webm' });
+                        const url  = URL.createObjectURL(blob);
+                        dlBtn.style.display = 'inline-block';
+                        dlBtn.onclick = () => {
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${id}-${Date.now()}.webm`;
+                            a.click();
+                        };
+                    };
+                    entry.recorder.start();
+                    entry.recording = true;
+                    recBtn.textContent = '⏹ Stop';
+                    recBtn.className = 'rec-btn recording';
+                    dlBtn.style.display = 'none';
+                } else {
+                    // stop
+                    entry.recorder.stop();
+                    entry.recording = false;
+                    recBtn.textContent = '⏺ Record';
+                    recBtn.className = 'rec-btn';
+                }
+            });
         }
 
         function setOffline(id) {
@@ -139,6 +170,7 @@
             c.badge.className = 'badge offline';
             c.badge.textContent = 'offline';
             if (c.fps) c.fps.textContent = '';
+            if (c.recording && c.recorder) { c.recorder.stop(); c.recording = false; }
         }
     </script>
 </body>
