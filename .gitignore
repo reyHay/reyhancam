@@ -1,0 +1,4 @@
+node_modules/
+camera/target/
+*.log
+*.jar

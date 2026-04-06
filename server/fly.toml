@@ -1,0 +1,17 @@
+# fly.toml — Fly.io app config
+app = "virus-exe"
+primary_region = "iad"  # change to your preferred region (iad=US-East, lhr=London, etc.)
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https   = true       # Fly handles TLS, redirects http -> https
+  auto_stop_machines  = false  # keep alive for persistent WebSocket connections
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

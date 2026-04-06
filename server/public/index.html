@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Camera Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0f0f0f; color: #e0e0e0; font-family: monospace; padding: 16px; }
+        h1 { font-size: 1.1rem; color: #00e5ff; margin-bottom: 4px; }
+        #status { font-size: 0.75rem; color: #888; margin-bottom: 16px; }
+        #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+
+        .card {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #111;
+            font-size: 0.8rem;
+        }
+        .card-header .name { color: #00e5ff; }
+        .card-header .badge {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #1e3a2f;
+            color: #4caf50;
+        }
+        .card-header .badge.no-cam { background: #2a2a1e; color: #aaa; }
+        .card-header .badge.offline { background: #3a1e1e; color: #f44336; }
+        .card-body {
+            padding: 12px;
+            font-size: 0.75rem;
+            color: #666;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+        }
+        .card-body img {
+            width: 100%;
+            display: block;
+            background: #000;
+            min-height: 180px;
+        }
+        .fps { font-size: 0.7rem; color: #555; }
+    </style>
+</head>
+<body>
+    <h1>Dashboard</h1>
+    <div id="status">Connecting...</div>
+    <div id="grid"></div>
+
+    <script>
+        const grid   = document.getElementById('grid');
+        const status = document.getElementById('status');
+        const cards  = {};
+
+        const ws = new WebSocket(`wss://${location.host}?role=dashboard`);
+
+        ws.onopen = () => {
+            status.textContent = 'Connected';
+            status.style.color = '#4caf50';
+        };
+        ws.onclose = () => {
+            status.textContent = 'Disconnected — reload to reconnect';
+            status.style.color = '#f44336';
+        };
+
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+
+            if (msg.type === 'pc_list') {
+                msg.pcs.forEach(pc => addCard(pc.id, pc.hasCamera));
+            }
+            if (msg.type === 'pc_connected') {
+                addCard(msg.id, msg.hasCamera);
+            }
+            if (msg.type === 'pc_disconnected') {
+                setOffline(msg.id);
+            }
+            if (msg.type === 'frame') {
+                const c = cards[msg.id];
+                if (!c || !c.img) return;
+                c.img.src = 'data:image/jpeg;base64,' + msg.frame;
+                c.frameCount++;
+                const now = Date.now();
+                if (now - c.lastTime >= 1000) {
+                    c.fps.textContent = c.frameCount + ' fps';
+                    c.frameCount = 0;
+                    c.lastTime = now;
+                }
+            }
+        };
+
+        function addCard(id, hasCamera) {
+            if (cards[id]) {
+                // re-activate if it was offline
+                cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam');
+                cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera';
+                return;
+            }
+
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="card-header">
+                    <span class="name">${id}</span>
+                    <span class="badge ${hasCamera ? '' : 'no-cam'}">${hasCamera ? 'camera on' : 'no camera'}</span>
+                </div>
+                <div class="card-body" id="body-${id}">
+                    ${hasCamera
+                        ? `<img id="img-${id}" alt="${id}"/>`
+                        : `<span>No camera detected on this PC</span>`}
+                </div>
+                ${hasCamera ? `<div style="padding:4px 12px 8px"><span class="fps" id="fps-${id}">-- fps</span></div>` : ''}
+            `;
+            grid.appendChild(card);
+
+            cards[id] = {
+                card,
+                badge:      card.querySelector('.badge'),
+                img:        card.querySelector(`#img-${id}`),
+                fps:        card.querySelector(`#fps-${id}`),
+                frameCount: 0,
+                lastTime:   Date.now(),
+            };
+        }
+
+        function setOffline(id) {
+            const c = cards[id];
+            if (!c) return;
+            c.badge.className = 'badge offline';
+            c.badge.textContent = 'offline';
+            if (c.fps) c.fps.textContent = '';
+        }
+    </script>
+</body>
+</html>
