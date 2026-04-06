@@ -19,7 +19,9 @@
         .card-header .badge.offline { background: #3a1e1e; color: #f44336; }
         .card-header .badge.screen { background: #1a2a3a; color: #00e5ff; }
         .card-body { position: relative; }
-        .card-body canvas { width: 100%; display: block; background: #000; min-height: 180px; }
+        .card-body canvas { width: 100%; display: block; background: #000; min-height: 180px; cursor: pointer; }
+        .fullscreen-btn { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.6); border: none; color: #fff; font-size: 0.75rem; padding: 3px 7px; border-radius: 6px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+        .card-body:hover .fullscreen-btn { opacity: 1; }
         .card-footer { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px 8px; }
         .fps { font-size: 0.7rem; color: #555; }
         .rec-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1e3a2f; color: #4caf50; }
@@ -141,7 +143,8 @@
                     ${type === 'camera' ? `<button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
                 </div>
                 <div class="card-body">
-                    ${active ? `<canvas id="img-${cardId}"></canvas>` : `<span style="padding:12px;font-size:0.75rem;color:#666;display:block">No ${type} detected</span>`}
+                    ${active ? `<canvas id="img-${cardId}"></canvas>
+                    <button class="fullscreen-btn">⛶ Fullscreen</button>` : `<span style="padding:12px;font-size:0.75rem;color:#666;display:block">No ${type} detected</span>`}
                 </div>
                 ${active ? `<div class="card-footer">
                     <span class="fps" id="fps-${cardId}">-- fps</span>
@@ -180,6 +183,11 @@
             entry.canvas.width  = isScreen ? 1920 : 1280;
             entry.canvas.height = isScreen ? 1080 : 720;
             entry.ctx = entry.canvas.getContext('2d');
+
+            const fsBtn = card.querySelector('.fullscreen-btn');
+            const goFullscreen = () => entry.canvas.requestFullscreen();
+            fsBtn.addEventListener('click', goFullscreen);
+            entry.canvas.addEventListener('dblclick', goFullscreen);
 
             // separate off-screen canvas for recording stream
             entry.recCanvas = document.createElement('canvas');

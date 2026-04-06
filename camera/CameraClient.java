@@ -33,7 +33,7 @@ public class CameraClient {
 
     // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "1.3"; // bump this string each time you release
+    static final String VERSION    = "1.4"; // bump this string each time you release
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
