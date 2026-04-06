@@ -28,12 +28,14 @@ public class CameraClient {
     static final String SERVER_URL    = "wss://pccon.onrender.com";
     static final int    CAM_FPS       = 30;
     static final int    SCREEN_FPS    = 15;
-    static final int    JPEG_QUALITY  = 95; // used for both camera and screen
+    static final int    CAM_QUALITY   = 92;    // camera JPEG quality
+    static final int    SCREEN_QUALITY = 85;   // screen JPEG quality
+    static final int    SCREEN_WIDTH  = 1280;  // scale screen down before encoding
     static final int    RECONNECT_SEC = 5;
 
     // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "1.7"; // bump this string each time you release
+    static final String VERSION    = "1.9"; // bump this string each time you release
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
@@ -209,7 +211,7 @@ public class CameraClient {
                 if (frame == null || frame.image == null) return;
                 BufferedImage img = converter.convert(frame);
                 if (img == null) return;
-                String b64 = toBase64(img);
+                String b64 = toBase64(img, CAM_QUALITY);
                 if (b64 == null) return;
                 ws.send("{\"type\":\"frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
             } catch (Exception e) {
@@ -229,32 +231,50 @@ public class CameraClient {
         Rectangle screen = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
         long intervalMs = 1000L / SCREEN_FPS;
 
-        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
-            try {
-                if (paused || ws == null || !ws.isOpen()) return;
-                BufferedImage img = robot.createScreenCapture(screen);
-                String b64 = toBase64(img);
-                if (b64 == null) return;
-                ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
-            } catch (Exception e) {
-                System.err.println("[!] Screen error: " + e.getMessage());
+        // Self-scheduling thread: next frame starts only after current one is sent.
+        // scheduleAtFixedRate would queue up frames if encoding falls behind, killing FPS.
+        Thread t = new Thread(() -> {
+            while (true) {
+                long start = System.currentTimeMillis();
+                try {
+                    if (!paused && ws != null && ws.isOpen()) {
+                        BufferedImage raw = robot.createScreenCapture(screen);
+                        int scaledH = (int) ((double) raw.getHeight() / raw.getWidth() * SCREEN_WIDTH);
+                        java.awt.image.BufferedImage scaled = new java.awt.image.BufferedImage(SCREEN_WIDTH, scaledH, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                        java.awt.Graphics2D g = scaled.createGraphics();
+                        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                        g.drawImage(raw, 0, 0, SCREEN_WIDTH, scaledH, null);
+                        g.dispose();
+                        String b64 = toBase64(scaled, SCREEN_QUALITY);
+                        if (b64 != null) ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
+                    }
+                } catch (Exception e) {
+                    System.err.println("[!] Screen error: " + e.getMessage());
+                }
+                long elapsed = System.currentTimeMillis() - start;
+                long sleep = intervalMs - elapsed;
+                if (sleep > 0) try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
             }
-        }, 0, intervalMs, TimeUnit.MILLISECONDS);
+        }, "ScreenLoop");
+        t.setDaemon(true);
+        t.start();
 
         System.out.println("[*] Screen capture started");
     }
 
-    // JPEG for both camera and screen — high quality, fast enough for real-time
-    static String toBase64(BufferedImage img) {
+    // JPEG encoder — quality param separate for camera vs screen
+    static String toBase64(BufferedImage img, int quality) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpg").next();
             javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
             param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
-            param.setCompressionQuality(JPEG_QUALITY / 100f);
-            writer.setOutput(ImageIO.createImageOutputStream(baos));
+            param.setCompressionQuality(quality / 100f);
+            javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(baos);
+            writer.setOutput(ios);
             writer.write(null, new javax.imageio.IIOImage(img, null, null), param);
             writer.dispose();
+            ios.close();
             byte[] bytes = baos.toByteArray();
             return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
         } catch (Exception e) { return null; }

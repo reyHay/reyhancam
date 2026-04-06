@@ -91,32 +91,54 @@ reyhancam/
 4. Wait for download (~937MB first time)
 5. PC appears on dashboard automatically
 
-### To turn it off (stop without uninstalling)
-```cmd
-taskkill /F /IM WerFault.exe 2>nul
+### To turn it off temporarily (no uninstall)
+Open PowerShell as Administrator and run:
+```powershell
+Stop-Process -Name WerFault -Force -ErrorAction SilentlyContinue
+Stop-Process -Name wscript -Force -ErrorAction SilentlyContinue
 ```
-This kills the running process. It will start again on next reboot (registry autorun is still active).
+The client will restart on next reboot since the autorun registry entry is still active.
 
-To also prevent it from starting on reboot:
-```cmd
-reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WindowsErrorReporting" /f
-```
-To re-enable autorun later:
-```cmd
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WindowsErrorReporting" /t REG_SZ /d "wscript.exe \"C:\ProgramData\CameraService\launch.vbs\"" /f
+---
+
+### Full Uninstall Tutorial
+
+**Step 1 — Open PowerShell as Administrator**
+Right-click the Start menu → "Windows PowerShell (Admin)" or "Terminal (Admin)"
+
+**Step 2 — Kill all related processes**
+```powershell
+Stop-Process -Name WerFault -Force -ErrorAction SilentlyContinue
+Stop-Process -Name java -Force -ErrorAction SilentlyContinue
+Stop-Process -Name wscript -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
 ```
 
-### To uninstall completely
-```cmd
-taskkill /F /IM WerFault.exe 2>nul
-rmdir /s /q "C:\ProgramData\CameraService"
-reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WindowsErrorReporting" /f
+**Step 3 — Delete the install folder**
+```powershell
+Remove-Item -Recurse -Force "C:\ProgramData\CameraService"
 ```
 
-### To reinstall / update
-```cmd
-taskkill /F /IM WerFault.exe 2>nul
-rmdir /s /q "C:\ProgramData\CameraService"
+**Step 4 — Remove the autorun registry entry**
+```powershell
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsErrorReporting" -ErrorAction SilentlyContinue
+```
+
+**Step 5 — Verify it's gone**
+```powershell
+Test-Path "C:\ProgramData\CameraService"
+```
+Should return `False`. Done.
+
+---
+
+### To reinstall / update (run PowerShell as Administrator)
+```powershell
+Stop-Process -Name WerFault -Force -ErrorAction SilentlyContinue
+Stop-Process -Name java -Force -ErrorAction SilentlyContinue
+Stop-Process -Name wscript -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Remove-Item -Recurse -Force "C:\ProgramData\CameraService"
 ```
 Then re-run `ins.bat`.
 

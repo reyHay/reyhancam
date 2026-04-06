@@ -111,26 +111,34 @@
             const c = store[id];
             if (!c || !c.canvas) return;
             const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
-            const img = new Image();
-            img.onload = () => {
-                // auto-resize canvas to match actual frame on first frame
-                if (c.canvas.width !== img.naturalWidth || c.canvas.height !== img.naturalHeight) {
-                    c.canvas.width  = img.naturalWidth;
-                    c.canvas.height = img.naturalHeight;
-                    if (c.recCanvas) { c.recCanvas.width = img.naturalWidth; c.recCanvas.height = img.naturalHeight; }
-                }
-                c.ctx.drawImage(img, 0, 0);
-                if (c.recording) c.recCtx.drawImage(img, 0, 0);
-            };
-            img.src = `data:${mime};base64,` + frame;
+            // createImageBitmap is faster than new Image() — no DOM overhead
+            fetch(`data:${mime};base64,` + frame)
+                .then(r => r.blob())
+                .then(blob => createImageBitmap(blob))
+                .then(bitmap => {
+                    if (c.canvas.width !== bitmap.width || c.canvas.height !== bitmap.height) {
+                        c.canvas.width  = bitmap.width;
+                        c.canvas.height = bitmap.height;
+                        if (c.recCanvas) { c.recCanvas.width = bitmap.width; c.recCanvas.height = bitmap.height; }
+                    }
+                    c.ctx.drawImage(bitmap, 0, 0);
+                    if (c.recording) c.recCtx.drawImage(bitmap, 0, 0);
+                    bitmap.close();
+                });
             c.frameCount++;
             const now = Date.now();
-            if (now - c.lastTime >= 1000) { c.fps.textContent = c.frameCount + ' fps'; c.frameCount = 0; c.lastTime = Date.now(); }
+            if (now - c.lastTime >= 1000) { c.fps.textContent = c.frameCount + ' fps'; c.frameCount = 0; c.lastTime = now; }
         }
 
         function addCards(id, hasCamera, hasScreen, version) {
             if (!cards[id])  addFeedCard(id, 'camera', hasCamera, version);
-            else { cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera'; cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam'); }
+            else {
+                cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera';
+                cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam');
+                // update version span on reconnect
+                const vSpan = cards[id].card.querySelector('.ver-span');
+                if (vSpan) vSpan.textContent = 'v' + (version || '?');
+            }
             if (hasScreen && !screens[id]) addFeedCard(id, 'screen', true, version);
         }
 
@@ -147,7 +155,7 @@
             card.innerHTML = `
                 <div class="card-header">
                     <span class="name" data-pcid="${id}" data-suffix="${suffix}">${displayName} ${suffix}</span>
-                    ${type === 'camera' ? `<span style="font-size:0.65rem;color:#555">v${version || '?'}</span>` : ''}
+                    ${type === 'camera' ? `<span class="ver-span" style="font-size:0.65rem;color:#555">v${version || '?'}</span>` : ''}
                     <span class="${badgeCls}">${label}</span>
                     ${type === 'camera' ? `<button class="update-btn" id="upd-${id}">↑ Update</button><button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
                 </div>
