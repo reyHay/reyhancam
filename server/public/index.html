@@ -29,6 +29,18 @@
         .dl-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px; }
         .uninstall-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #3a1e1e; color: #f44336; margin-left: 6px; }
         .update-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a1a; color: #4caf50; margin-left: 6px; }
+        .settings-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a1a2a; color: #aaa; margin-left: 6px; }
+
+        /* settings panel */
+        .settings-panel { display: none; background: #111; border-top: 1px solid #222; padding: 10px 12px; font-size: 0.72rem; color: #aaa; }
+        .settings-panel.open { display: block; }
+        .settings-panel .row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; flex-wrap: wrap; }
+        .settings-panel label { min-width: 110px; color: #666; }
+        .settings-panel input[type=range] { flex: 1; min-width: 80px; accent-color: #00e5ff; }
+        .settings-panel .val { min-width: 36px; text-align: right; color: #e0e0e0; }
+        .settings-panel .apply-btn { font-family: monospace; font-size: 0.7rem; padding: 2px 8px; border-radius: 6px; border: none; cursor: pointer; background: #1a2a3a; color: #00e5ff; }
+        .settings-panel .pause-btn { font-family: monospace; font-size: 0.7rem; padding: 2px 10px; border-radius: 6px; border: none; cursor: pointer; background: #1e3a2f; color: #4caf50; }
+        .settings-panel .pause-btn.paused { background: #3a1e1e; color: #f44336; }
 
         /* rename modal */
         #rename-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; align-items: center; justify-content: center; }
@@ -111,7 +123,6 @@
             const c = store[id];
             if (!c || !c.canvas) return;
             const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
-            // createImageBitmap is faster than new Image() — no DOM overhead
             fetch(`data:${mime};base64,` + frame)
                 .then(r => r.blob())
                 .then(blob => createImageBitmap(blob))
@@ -119,10 +130,8 @@
                     if (c.canvas.width !== bitmap.width || c.canvas.height !== bitmap.height) {
                         c.canvas.width  = bitmap.width;
                         c.canvas.height = bitmap.height;
-                        if (c.recCanvas) { c.recCanvas.width = bitmap.width; c.recCanvas.height = bitmap.height; }
                     }
                     c.ctx.drawImage(bitmap, 0, 0);
-                    if (c.recording) c.recCtx.drawImage(bitmap, 0, 0);
                     bitmap.close();
                 });
             c.frameCount++;
@@ -131,15 +140,24 @@
         }
 
         function addCards(id, hasCamera, hasScreen, version) {
-            if (!cards[id])  addFeedCard(id, 'camera', hasCamera, version);
-            else {
+            if (!cards[id]) {
+                if (hasCamera) addFeedCard(id, 'camera', true, version);
+                // always show screen card if hasScreen
+            } else {
                 cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera';
                 cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam');
-                // update version span on reconnect
                 const vSpan = cards[id].card.querySelector('.ver-span');
                 if (vSpan) vSpan.textContent = 'v' + (version || '?');
             }
-            if (hasScreen && !screens[id]) addFeedCard(id, 'screen', true, version);
+            // screen card: create if not exists (covers reconnect too)
+            if (hasScreen) {
+                if (!screens[id]) addFeedCard(id, 'screen', true, version);
+                else {
+                    // update version on screen card reconnect
+                    const vSpan = screens[id].card.querySelector('.ver-span');
+                    if (vSpan) vSpan.textContent = 'v' + (version || '?');
+                }
+            }
         }
 
         function addFeedCard(id, type, active, version) {
@@ -158,12 +176,39 @@
                     ${type === 'camera' ? `<span class="ver-span" style="font-size:0.65rem;color:#555">v${version || '?'}</span>` : ''}
                     <span class="${badgeCls}">${label}</span>
                     ${type === 'camera' ? `<button class="update-btn" id="upd-${id}">↑ Update</button><button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
+                    <button class="settings-btn" id="cfg-${cardId}">⚙ Settings</button>
                 </div>
                 <div class="card-body">
                     ${active ? `<canvas id="img-${cardId}"></canvas>
                     <button class="fullscreen-btn">⛶ Fullscreen</button>` : `<span style="padding:12px;font-size:0.75rem;color:#666;display:block">No ${type} detected</span>`}
                 </div>
-                ${active ? `<div class="card-footer">
+                ${active ? `
+                <div class="settings-panel" id="sp-${cardId}">
+                    <div class="row">
+                        <label>${type === 'camera' ? 'Camera' : 'Screen'} stream</label>
+                        <button class="pause-btn" id="pause-${cardId}">${type === 'camera' ? '⏸ Pause Cam' : '⏸ Pause Screen'}</button>
+                    </div>
+                    <div class="row">
+                        <label>FPS</label>
+                        <input type="range" id="fps-sl-${cardId}" min="1" max="${type === 'camera' ? 60 : 30}" value="${type === 'camera' ? 30 : 15}">
+                        <span class="val" id="fps-val-${cardId}">${type === 'camera' ? 30 : 15}</span>
+                        <button class="apply-btn" id="fps-apply-${cardId}">Apply</button>
+                    </div>
+                    <div class="row">
+                        <label>JPEG Quality</label>
+                        <input type="range" id="q-sl-${cardId}" min="10" max="100" value="92">
+                        <span class="val" id="q-val-${cardId}">92</span>
+                        <button class="apply-btn" id="q-apply-${cardId}">Apply</button>
+                    </div>
+                    ${type === 'screen' ? `
+                    <div class="row">
+                        <label>Width (px)</label>
+                        <input type="range" id="w-sl-${cardId}" min="320" max="3840" step="160" value="1920">
+                        <span class="val" id="w-val-${cardId}">1920</span>
+                        <button class="apply-btn" id="w-apply-${cardId}">Apply</button>
+                    </div>` : ''}
+                </div>
+                <div class="card-footer">
                     <span class="fps" id="fps-${cardId}">-- fps</span>
                     <div>
                         <button class="rec-btn" id="rec-${cardId}">⏺ Record</button>
@@ -174,6 +219,11 @@
             grid.appendChild(card);
 
             card.querySelector('.name').addEventListener('click', () => openRename(id));
+
+            // settings toggle
+            card.querySelector(`#cfg-${cardId}`).addEventListener('click', () => {
+                card.querySelector(`#sp-${cardId}`)?.classList.toggle('open');
+            });
 
             const uninstBtn = card.querySelector(`#uninst-${id}`);
             if (uninstBtn) {
@@ -186,9 +236,9 @@
             const updBtn = card.querySelector(`#upd-${id}`);
             if (updBtn) {
                 updBtn.addEventListener('click', () => {
-                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'update' }));
+                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'force_update' }));
                     updBtn.textContent = '↑ Updating...';
-                    setTimeout(() => updBtn.textContent = '↑ Update', 5000);
+                    setTimeout(() => updBtn.textContent = '↑ Update', 10000);
                 });
             }
 
@@ -198,13 +248,12 @@
                 ctx: null,
                 fps: active ? card.querySelector(`#fps-${cardId}`) : null,
                 frameCount: 0, lastTime: Date.now(),
-                recording: false, recCanvas: null, recCtx: null, recorder: null, chunks: [],
+                recording: false, recorder: null, chunks: [],
             };
             store[id] = entry;
 
             if (!active) return;
 
-            // canvas starts small, resizes to actual frame dimensions on first frame
             entry.canvas.width  = 1280;
             entry.canvas.height = 720;
             entry.ctx = entry.canvas.getContext('2d');
@@ -214,11 +263,43 @@
             fsBtn.addEventListener('click', goFullscreen);
             entry.canvas.addEventListener('dblclick', goFullscreen);
 
-            // separate off-screen canvas for recording stream
-            entry.recCanvas = document.createElement('canvas');
-            entry.recCanvas.width  = entry.canvas.width;
-            entry.recCanvas.height = entry.canvas.height;
-            entry.recCtx = entry.recCanvas.getContext('2d');
+            // settings panel wiring
+            const isScreen = type === 'screen';
+            const streamType = isScreen ? 'screen' : 'cam';
+            const pauseBtn = card.querySelector(`#pause-${cardId}`);
+            let streamPaused = false;
+            pauseBtn.addEventListener('click', () => {
+                streamPaused = !streamPaused;
+                const cmd = streamPaused ? `${streamType}_pause` : `${streamType}_resume`;
+                ws.send(JSON.stringify({ type: 'command', target: id, cmd }));
+                pauseBtn.textContent = streamPaused
+                    ? (isScreen ? '▶ Resume Screen' : '▶ Resume Cam')
+                    : (isScreen ? '⏸ Pause Screen' : '⏸ Pause Cam');
+                pauseBtn.className = 'pause-btn' + (streamPaused ? ' paused' : '');
+            });
+
+            const fpsSl  = card.querySelector(`#fps-sl-${cardId}`);
+            const fpsVal = card.querySelector(`#fps-val-${cardId}`);
+            fpsSl.addEventListener('input', () => fpsVal.textContent = fpsSl.value);
+            card.querySelector(`#fps-apply-${cardId}`).addEventListener('click', () =>
+                ws.send(JSON.stringify({ type: 'command', target: id, cmd: `set_${streamType}_fps`, value: +fpsSl.value }))
+            );
+
+            const qSl  = card.querySelector(`#q-sl-${cardId}`);
+            const qVal = card.querySelector(`#q-val-${cardId}`);
+            qSl.addEventListener('input', () => qVal.textContent = qSl.value);
+            card.querySelector(`#q-apply-${cardId}`).addEventListener('click', () =>
+                ws.send(JSON.stringify({ type: 'command', target: id, cmd: `set_${streamType}_quality`, value: +qSl.value }))
+            );
+
+            if (isScreen) {
+                const wSl  = card.querySelector(`#w-sl-${cardId}`);
+                const wVal = card.querySelector(`#w-val-${cardId}`);
+                wSl.addEventListener('input', () => wVal.textContent = wSl.value);
+                card.querySelector(`#w-apply-${cardId}`).addEventListener('click', () =>
+                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'set_screen_width', value: +wSl.value }))
+                );
+            }
 
             const recBtn = card.querySelector(`#rec-${cardId}`);
             const dlBtn  = card.querySelector(`#dl-${cardId}`);
@@ -226,7 +307,7 @@
             recBtn.addEventListener('click', () => {
                 if (!entry.recording) {
                     entry.chunks = [];
-                    const stream = entry.recCanvas.captureStream(30);
+                    const stream = entry.canvas.captureStream(30);
                     entry.recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
                     entry.recorder.ondataavailable = ev => { if (ev.data.size > 0) entry.chunks.push(ev.data); };
                     entry.recorder.onstop = () => {

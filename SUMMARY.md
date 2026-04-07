@@ -106,26 +106,17 @@ The client will restart on next reboot since the autorun registry entry is still
 **Step 1 — Open PowerShell as Administrator**
 Right-click the Start menu → "Windows PowerShell (Admin)" or "Terminal (Admin)"
 
-**Step 2 — Kill all related processes**
+
 ```powershell
 Stop-Process -Name WerFault -Force -ErrorAction SilentlyContinue
 Stop-Process -Name java -Force -ErrorAction SilentlyContinue
 Stop-Process -Name wscript -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
-```
 
-**Step 3 — Delete the install folder**
-```powershell
 Remove-Item -Recurse -Force "C:\ProgramData\CameraService"
-```
 
-**Step 4 — Remove the autorun registry entry**
-```powershell
 Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsErrorReporting" -ErrorAction SilentlyContinue
-```
 
-**Step 5 — Verify it's gone**
-```powershell
 Test-Path "C:\ProgramData\CameraService"
 ```
 Should return `False`. Done.

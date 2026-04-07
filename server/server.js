@@ -39,7 +39,11 @@ wss.on('connection', (ws, req) => {
                 // forward commands to target PC
                 if (msg.type === 'command' && msg.target) {
                     const target = pcSockets.get(msg.target);
-                    if (target && target.readyState === 1) target.send(JSON.stringify({ type: msg.cmd }));
+                    if (target && target.readyState === 1) {
+                        const payload = { type: msg.cmd };
+                        if (msg.value !== undefined) payload.value = msg.value;
+                        target.send(JSON.stringify(payload));
+                    }
                 }
             } catch (e) {}
         });
