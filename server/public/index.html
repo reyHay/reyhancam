@@ -1,342 +1,580 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Camera Dashboard</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0f0f0f; color: #e0e0e0; font-family: monospace; padding: 16px; }
-        h1 { font-size: 1.1rem; color: #00e5ff; margin-bottom: 4px; }
-        #status { font-size: 0.75rem; color: #888; margin-bottom: 16px; }
-        #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-        .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; overflow: hidden; }
-        .card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #111; font-size: 0.8rem; gap: 6px; }
-        .card-header .name { color: #00e5ff; cursor: pointer; }
-        .card-header .name:hover { text-decoration: underline; }
-        .card-header .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: #1e3a2f; color: #4caf50; white-space: nowrap; }
-        .card-header .badge.no-cam { background: #2a2a1e; color: #aaa; }
-        .card-header .badge.offline { background: #3a1e1e; color: #f44336; }
-        .card-header .badge.screen { background: #1a2a3a; color: #00e5ff; }
-        .card-body { position: relative; }
-        .card-body canvas { width: 100%; display: block; background: #000; min-height: 180px; cursor: pointer; }
-        .fullscreen-btn { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.6); border: none; color: #fff; font-size: 0.75rem; padding: 3px 7px; border-radius: 6px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
-        .card-body:hover .fullscreen-btn { opacity: 1; }
-        .card-footer { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px 8px; }
-        .fps { font-size: 0.7rem; color: #555; }
-        .rec-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1e3a2f; color: #4caf50; }
-        .rec-btn.recording { background: #3a1e1e; color: #f44336; }
-        .dl-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a3a; color: #00e5ff; display: none; margin-left: 6px; }
-        .uninstall-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #3a1e1e; color: #f44336; margin-left: 6px; }
-        .update-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a2a1a; color: #4caf50; margin-left: 6px; }
-        .settings-btn { font-size: 0.7rem; font-family: monospace; cursor: pointer; padding: 3px 10px; border-radius: 10px; border: none; background: #1a1a2a; color: #aaa; margin-left: 6px; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0a;color:#e0e0e0;font-family:monospace;padding:14px;min-height:100vh}
+#topbar{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+#topbar h1{font-size:1rem;color:#00e5ff;letter-spacing:1px}
+#status{font-size:0.72rem;padding:2px 10px;border-radius:10px;background:#1a1a1a;border:1px solid #2a2a2a}
+#status.ok{color:#4caf50;border-color:#1e3a2f}
+#status.err{color:#f44336;border-color:#3a1e1e}
+#ping-display{font-size:0.68rem;color:#555;margin-left:auto}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px}
 
-        /* settings panel */
-        .settings-panel { display: none; background: #111; border-top: 1px solid #222; padding: 10px 12px; font-size: 0.72rem; color: #aaa; }
-        .settings-panel.open { display: block; }
-        .settings-panel .row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; flex-wrap: wrap; }
-        .settings-panel label { min-width: 110px; color: #666; }
-        .settings-panel input[type=range] { flex: 1; min-width: 80px; accent-color: #00e5ff; }
-        .settings-panel .val { min-width: 36px; text-align: right; color: #e0e0e0; }
-        .settings-panel .apply-btn { font-family: monospace; font-size: 0.7rem; padding: 2px 8px; border-radius: 6px; border: none; cursor: pointer; background: #1a2a3a; color: #00e5ff; }
-        .settings-panel .pause-btn { font-family: monospace; font-size: 0.7rem; padding: 2px 10px; border-radius: 6px; border: none; cursor: pointer; background: #1e3a2f; color: #4caf50; }
-        .settings-panel .pause-btn.paused { background: #3a1e1e; color: #f44336; }
+/* ── card ── */
+.card{background:#141414;border:1px solid #222;border-radius:8px;overflow:hidden;transition:border-color .2s}
+.card:hover{border-color:#333}
+.card.offline{opacity:.5}
+.card-header{display:flex;align-items:center;padding:7px 10px;background:#0f0f0f;font-size:0.75rem;gap:5px;flex-wrap:wrap}
+.card-header .name{color:#00e5ff;cursor:pointer;font-weight:bold;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-header .name:hover{text-decoration:underline}
+.badge{font-size:0.65rem;padding:2px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+.badge.cam-on{background:#1e3a2f;color:#4caf50}
+.badge.no-cam{background:#2a2a1e;color:#888}
+.badge.screen{background:#1a2a3a;color:#00e5ff}
+.badge.mic{background:#2a1a3a;color:#ce93d8}
+.badge.offline{background:#3a1e1e;color:#f44336}
+.ver{font-size:0.6rem;color:#444;flex-shrink:0}
+.stale-dot{width:6px;height:6px;border-radius:50%;background:#f44336;display:inline-block;margin-left:4px;opacity:0;transition:opacity .3s}
+.stale-dot.visible{opacity:1}
 
-        /* rename modal */
-        #rename-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; align-items: center; justify-content: center; }
-        #rename-modal.active { display: flex; }
-        #rename-box { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-width: 260px; }
-        #rename-box label { font-size: 0.8rem; color: #888; }
-        #rename-input { background: #111; border: 1px solid #333; color: #e0e0e0; font-family: monospace; font-size: 0.9rem; padding: 6px 10px; border-radius: 6px; outline: none; }
-        #rename-input:focus { border-color: #00e5ff; }
-        #rename-actions { display: flex; gap: 8px; justify-content: flex-end; }
-        .modal-btn { font-family: monospace; font-size: 0.75rem; padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer; }
-        #rename-ok  { background: #1e3a2f; color: #4caf50; }
-        #rename-cancel { background: #2a2a2a; color: #aaa; }
-    </style>
+/* ── video body ── */
+.card-body{position:relative;background:#000}
+.card-body canvas{width:100%;display:block;min-height:160px;cursor:pointer}
+.overlay-btns{position:absolute;bottom:6px;right:6px;display:flex;gap:4px;opacity:0;transition:opacity .2s}
+.card-body:hover .overlay-btns{opacity:1}
+.icon-btn{background:rgba(0,0,0,.65);border:none;color:#fff;font-size:0.7rem;padding:3px 7px;border-radius:5px;cursor:pointer}
+.icon-btn:hover{background:rgba(0,0,0,.9)}
+
+/* ── footer ── */
+.card-footer{display:flex;align-items:center;justify-content:space-between;padding:4px 10px 6px;gap:4px;flex-wrap:wrap}
+.fps-label{font-size:0.65rem;color:#444}
+.btn-row{display:flex;gap:4px;flex-wrap:wrap}
+.btn{font-size:0.68rem;font-family:monospace;cursor:pointer;padding:2px 9px;border-radius:8px;border:none}
+.btn-rec{background:#1e3a2f;color:#4caf50}
+.btn-rec.recording{background:#3a1e1e;color:#f44336}
+.btn-dl{background:#1a2a3a;color:#00e5ff;display:none}
+.btn-snap{background:#1a1a2a;color:#aaa}
+.btn-upd{background:#1a2a1a;color:#4caf50}
+.btn-uninst{background:#3a1e1e;color:#f44336}
+.btn-cfg{background:#1e1e2a;color:#888}
+
+/* ── settings panel ── */
+.settings-panel{display:none;background:#0f0f0f;border-top:1px solid #1e1e1e;padding:8px 10px;font-size:0.7rem;color:#888}
+.settings-panel.open{display:block}
+.sp-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.sp-row label{min-width:100px;color:#555}
+.sp-row input[type=range]{flex:1;min-width:70px;accent-color:#00e5ff}
+.sp-val{min-width:32px;text-align:right;color:#ccc}
+.btn-apply{font-family:monospace;font-size:0.65rem;padding:1px 7px;border-radius:5px;border:none;cursor:pointer;background:#1a2a3a;color:#00e5ff}
+.btn-pause{font-family:monospace;font-size:0.65rem;padding:2px 9px;border-radius:5px;border:none;cursor:pointer;background:#1e3a2f;color:#4caf50}
+.btn-pause.paused{background:#3a1e1e;color:#f44336}
+
+/* ── mic card ── */
+.mic-body{padding:8px 10px}
+.mic-wave{width:100%;height:44px;background:#000;border-radius:4px;display:block}
+.mic-controls{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
+.vol-bar-wrap{flex:1;height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden;min-width:60px}
+.vol-bar{height:100%;width:0%;background:#4caf50;border-radius:3px;transition:width .05s}
+
+/* ── rename modal ── */
+#rename-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center}
+#rename-modal.active{display:flex}
+#rename-box{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:10px;min-width:250px}
+#rename-box label{font-size:0.75rem;color:#777}
+#rename-input{background:#111;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:0.85rem;padding:5px 9px;border-radius:6px;outline:none}
+#rename-input:focus{border-color:#00e5ff}
+#rename-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-btn{font-family:monospace;font-size:0.72rem;padding:4px 12px;border-radius:7px;border:none;cursor:pointer}
+#rename-ok{background:#1e3a2f;color:#4caf50}
+#rename-cancel{background:#2a2a2a;color:#888}
+</style>
 </head>
 <body>
-    <h1>Dashboard</h1>
-    <div id="status">Connecting...</div>
-    <div id="grid"></div>
+<div id="topbar">
+  <h1>⬡ Dashboard</h1>
+  <span id="status" class="err">Connecting...</span>
+  <span id="ping-display"></span>
+</div>
+<div id="grid"></div>
 
-    <!-- rename modal -->
-    <div id="rename-modal">
-        <div id="rename-box">
-            <label>Rename PC</label>
-            <input id="rename-input" type="text"/>
-            <div id="rename-actions">
-                <button class="modal-btn" id="rename-cancel">Cancel</button>
-                <button class="modal-btn" id="rename-ok">OK</button>
+<div id="rename-modal">
+  <div id="rename-box">
+    <label>Rename PC</label>
+    <input id="rename-input" type="text"/>
+    <div id="rename-actions">
+      <button class="modal-btn" id="rename-cancel">Cancel</button>
+      <button class="modal-btn" id="rename-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const grid   = document.getElementById('grid');
+const status = document.getElementById('status');
+const pingEl = document.getElementById('ping-display');
+const aliases = JSON.parse(localStorage.getItem('pc-aliases') || '{}');
+
+// stores per pcId
+const cards   = {}; // camera feed entries
+const screens = {}; // screen feed entries
+const mics    = {}; // mic entries
+
+// ── rename modal ──────────────────────────────────────────────────────────────
+const renameModal = document.getElementById('rename-modal');
+const renameInput = document.getElementById('rename-input');
+let renamingId = null;
+function openRename(id) {
+    renamingId = id;
+    renameInput.value = aliases[id] || id;
+    renameModal.classList.add('active');
+    renameInput.focus(); renameInput.select();
+}
+function applyRename() {
+    if (!renamingId) return;
+    const val = renameInput.value.trim();
+    if (val) {
+        aliases[renamingId] = val;
+        localStorage.setItem('pc-aliases', JSON.stringify(aliases));
+        document.querySelectorAll(`[data-pcid="${renamingId}"]`)
+            .forEach(el => el.textContent = val + ' ' + el.dataset.suffix);
+    }
+    renameModal.classList.remove('active'); renamingId = null;
+}
+document.getElementById('rename-ok').onclick = applyRename;
+document.getElementById('rename-cancel').onclick = () => { renameModal.classList.remove('active'); renamingId = null; };
+renameInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyRename();
+    if (e.key === 'Escape') document.getElementById('rename-cancel').click();
+});
+
+// ── WebSocket with auto-reconnect ─────────────────────────────────────────────
+let ws, reconnectDelay = 1000;
+function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}?role=dashboard`);
+
+    ws.onopen = () => {
+        status.textContent = 'Connected';
+        status.className = 'ok';
+        reconnectDelay = 1000;
+        startPing();
+    };
+    ws.onclose = () => {
+        status.textContent = `Reconnecting in ${(reconnectDelay/1000).toFixed(0)}s...`;
+        status.className = 'err';
+        pingEl.textContent = '';
+        setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connect(); }, reconnectDelay);
+    };
+    ws.onerror = () => ws.close();
+
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        switch (msg.type) {
+            case 'pc_list':        msg.pcs.forEach(pc => addCards(pc)); break;
+            case 'pc_connected':   addCards(msg); break;
+            case 'pc_disconnected': setOffline(msg.id); break;
+            case 'frame':          updateFeed(cards,   msg.id, msg.frame); break;
+            case 'screen_frame':   updateFeed(screens, msg.id, msg.frame); break;
+            case 'audio_chunk':    playAudioChunk(msg.id, msg.audio, msg.sr || 16000); break;
+            case 'caps_update':    handleCapsUpdate(msg); break;
+            case 'pong':           handlePong(msg); break;
+        }
+    };
+}
+connect();
+
+// ── ping/latency ──────────────────────────────────────────────────────────────
+let pingInterval;
+function startPing() {
+    clearInterval(pingInterval);
+    pingInterval = setInterval(() => {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+    }, 5000);
+}
+function handlePong(msg) {
+    const rtt = Date.now() - msg.t;
+    pingEl.textContent = `ping ${rtt}ms`;
+}
+
+// ── stale frame detection ─────────────────────────────────────────────────────
+setInterval(() => {
+    const now = Date.now();
+    for (const [id, c] of Object.entries(cards)) {
+        if (!c.staleDot) continue;
+        c.staleDot.classList.toggle('visible', now - c.lastFrameTime > 3000);
+    }
+    for (const [id, c] of Object.entries(screens)) {
+        if (!c.staleDot) continue;
+        c.staleDot.classList.toggle('visible', now - c.lastFrameTime > 3000);
+    }
+}, 1000);
+
+// ── caps update (mic confirmed/denied after startup) ──────────────────────────
+function handleCapsUpdate(msg) {
+    if (msg.hasMic && !mics[msg.id]) addMicCard(msg.id, '?');
+}
+
+// ── frame rendering ───────────────────────────────────────────────────────────
+function updateFeed(store, id, frame) {
+    const c = store[id];
+    if (!c || !c.canvas) return;
+    createImageBitmap(b64ToBlob(frame, 'image/jpeg')).then(bitmap => {
+        if (c.canvas.width !== bitmap.width || c.canvas.height !== bitmap.height) {
+            c.canvas.width = bitmap.width; c.canvas.height = bitmap.height;
+        }
+        c.ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+    });
+    c.frameCount++;
+    c.lastFrameTime = Date.now();
+    const now = Date.now();
+    if (now - c.lastFpsTime >= 1000) {
+        c.fpsEl.textContent = c.frameCount + ' fps';
+        c.frameCount = 0; c.lastFpsTime = now;
+    }
+}
+
+function b64ToBlob(b64, mime) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+}
+
+// ── add cards for a PC ────────────────────────────────────────────────────────
+function addCards(pc) {
+    const { id, hasCamera, hasScreen, hasMic, version } = pc;
+    if (!cards[id]  && hasCamera) addFeedCard(id, 'camera', version);
+    if (!screens[id] && hasScreen) addFeedCard(id, 'screen', version);
+    if (!mics[id]   && hasMic)    addMicCard(id, version);
+    // update version badge if card already exists
+    document.querySelectorAll(`.ver[data-pcid="${id}"]`).forEach(el => el.textContent = 'v' + (version || '?'));
+}
+
+// ── feed card (camera or screen) ──────────────────────────────────────────────
+function addFeedCard(id, type, version) {
+    const store     = type === 'camera' ? cards : screens;
+    const cardId    = type === 'camera' ? id : id + '-screen';
+    const suffix    = type === 'screen' ? '🖥' : '📷';
+    const badgeTxt  = type === 'screen' ? 'screen' : 'camera on';
+    const badgeCls  = type === 'screen' ? 'badge screen' : 'badge cam-on';
+    const displayName = aliases[id] || id;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.pcid = id;
+    card.innerHTML = `
+        <div class="card-header">
+            <span class="name" data-pcid="${id}" data-suffix="${suffix}">${displayName} ${suffix}</span>
+            <span class="stale-dot" title="No frames received"></span>
+            <span class="ver" data-pcid="${id}">v${version || '?'}</span>
+            <span class="${badgeCls}">${badgeTxt}</span>
+            ${type === 'camera' ? `
+            <button class="btn btn-upd" id="upd-${id}">↑ Update</button>
+            <button class="btn btn-uninst" id="uninst-${id}">🗑</button>` : ''}
+            <button class="btn btn-cfg" id="cfg-${cardId}">⚙</button>
+        </div>
+        <div class="card-body">
+            <canvas id="img-${cardId}"></canvas>
+            <div class="overlay-btns">
+                <button class="icon-btn" id="snap-${cardId}">📷 Snap</button>
+                <button class="icon-btn" id="fs-${cardId}">⛶</button>
             </div>
         </div>
-    </div>
+        <div class="settings-panel" id="sp-${cardId}">
+            <div class="sp-row">
+                <label>Stream</label>
+                <button class="btn-pause" id="pause-${cardId}">${type === 'camera' ? '⏸ Pause Cam' : '⏸ Pause Screen'}</button>
+            </div>
+            <div class="sp-row">
+                <label>FPS</label>
+                <input type="range" id="fps-sl-${cardId}" min="1" max="${type === 'camera' ? 60 : 30}" value="${type === 'camera' ? 30 : 15}">
+                <span class="sp-val" id="fps-val-${cardId}">${type === 'camera' ? 30 : 15}</span>
+                <button class="btn-apply" id="fps-apply-${cardId}">Apply</button>
+            </div>
+            <div class="sp-row">
+                <label>JPEG Quality</label>
+                <input type="range" id="q-sl-${cardId}" min="10" max="100" value="92">
+                <span class="sp-val" id="q-val-${cardId}">92</span>
+                <button class="btn-apply" id="q-apply-${cardId}">Apply</button>
+            </div>
+            ${type === 'screen' ? `
+            <div class="sp-row">
+                <label>Width (px)</label>
+                <input type="range" id="w-sl-${cardId}" min="320" max="3840" step="160" value="1920">
+                <span class="sp-val" id="w-val-${cardId}">1920</span>
+                <button class="btn-apply" id="w-apply-${cardId}">Apply</button>
+            </div>` : ''}
+        </div>
+        <div class="card-footer">
+            <span class="fps-label" id="fps-${cardId}">-- fps</span>
+            <div class="btn-row">
+                <button class="btn btn-rec" id="rec-${cardId}">⏺ Record</button>
+                <button class="btn btn-dl"  id="dl-${cardId}">⬇ Download</button>
+            </div>
+        </div>
+    `;
+    grid.appendChild(card);
 
-    <script>
-        const grid    = document.getElementById('grid');
-        const status  = document.getElementById('status');
-        const cards   = {};
-        const screens = {};
-        const aliases = JSON.parse(localStorage.getItem('pc-aliases') || '{}');
+    const canvas = card.querySelector(`#img-${cardId}`);
+    canvas.width = 1280; canvas.height = 720;
+    const ctx = canvas.getContext('2d');
 
-        // rename modal
-        const renameModal = document.getElementById('rename-modal');
-        const renameInput = document.getElementById('rename-input');
-        let renamingId = null;
+    const entry = {
+        card, canvas, ctx,
+        fpsEl: card.querySelector(`#fps-${cardId}`),
+        staleDot: card.querySelector('.stale-dot'),
+        frameCount: 0, lastFpsTime: Date.now(), lastFrameTime: Date.now(),
+        recording: false, recorder: null, chunks: [],
+    };
+    store[id] = entry;
 
-        function openRename(id) {
-            renamingId = id;
-            renameInput.value = aliases[id] || id;
-            renameModal.classList.add('active');
-            renameInput.focus();
-            renameInput.select();
-        }
-        function applyRename() {
-            if (!renamingId) return;
-            const val = renameInput.value.trim();
-            if (val) {
-                aliases[renamingId] = val;
-                localStorage.setItem('pc-aliases', JSON.stringify(aliases));
-                document.querySelectorAll(`[data-pcid="${renamingId}"]`).forEach(el => el.textContent = val + ' ' + el.dataset.suffix);
-            }
-            renameModal.classList.remove('active');
-            renamingId = null;
-        }
-        document.getElementById('rename-ok').onclick = applyRename;
-        document.getElementById('rename-cancel').onclick = () => { renameModal.classList.remove('active'); renamingId = null; };
-        renameInput.addEventListener('keydown', e => { if (e.key === 'Enter') applyRename(); if (e.key === 'Escape') document.getElementById('rename-cancel').click(); });
+    card.querySelector('.name').addEventListener('click', () => openRename(id));
 
-        const ws = new WebSocket(`wss://${location.host}?role=dashboard`);
-        ws.onopen  = () => { status.textContent = 'Connected'; status.style.color = '#4caf50'; };
-        ws.onclose = () => { status.textContent = 'Disconnected — reload to reconnect'; status.style.color = '#f44336'; };
+    // fullscreen
+    const goFs = () => canvas.requestFullscreen();
+    card.querySelector(`#fs-${cardId}`).addEventListener('click', goFs);
+    canvas.addEventListener('dblclick', goFs);
 
-        ws.onmessage = (e) => {
-            const msg = JSON.parse(e.data);
-            if (msg.type === 'pc_list')         msg.pcs.forEach(pc => addCards(pc.id, pc.hasCamera, pc.hasScreen, pc.version));
-            if (msg.type === 'pc_connected')    addCards(msg.id, msg.hasCamera, msg.hasScreen, msg.version);
-            if (msg.type === 'pc_disconnected') setOffline(msg.id);
-            if (msg.type === 'frame')           updateFeed(cards, msg.id, msg.frame, 'jpeg');
-            if (msg.type === 'screen_frame')    updateFeed(screens, msg.id, msg.frame, 'jpeg');
-        };
+    // snapshot
+    card.querySelector(`#snap-${cardId}`).addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = `${cardId}-${Date.now()}.png`;
+        a.click();
+    });
 
-        function updateFeed(store, id, frame, fmt) {
-            const c = store[id];
-            if (!c || !c.canvas) return;
-            const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
-            fetch(`data:${mime};base64,` + frame)
-                .then(r => r.blob())
-                .then(blob => createImageBitmap(blob))
-                .then(bitmap => {
-                    if (c.canvas.width !== bitmap.width || c.canvas.height !== bitmap.height) {
-                        c.canvas.width  = bitmap.width;
-                        c.canvas.height = bitmap.height;
-                    }
-                    c.ctx.drawImage(bitmap, 0, 0);
-                    bitmap.close();
-                });
-            c.frameCount++;
-            const now = Date.now();
-            if (now - c.lastTime >= 1000) { c.fps.textContent = c.frameCount + ' fps'; c.frameCount = 0; c.lastTime = now; }
-        }
+    // settings toggle
+    card.querySelector(`#cfg-${cardId}`).addEventListener('click', () =>
+        card.querySelector(`#sp-${cardId}`).classList.toggle('open')
+    );
 
-        function addCards(id, hasCamera, hasScreen, version) {
-            if (!cards[id]) {
-                if (hasCamera) addFeedCard(id, 'camera', true, version);
-                // always show screen card if hasScreen
-            } else {
-                cards[id].badge.textContent = hasCamera ? 'camera on' : 'no camera';
-                cards[id].badge.className = 'badge' + (hasCamera ? '' : ' no-cam');
-                const vSpan = cards[id].card.querySelector('.ver-span');
-                if (vSpan) vSpan.textContent = 'v' + (version || '?');
-            }
-            // screen card: create if not exists (covers reconnect too)
-            if (hasScreen) {
-                if (!screens[id]) addFeedCard(id, 'screen', true, version);
-                else {
-                    // update version on screen card reconnect
-                    const vSpan = screens[id].card.querySelector('.ver-span');
-                    if (vSpan) vSpan.textContent = 'v' + (version || '?');
-                }
-            }
-        }
+    // uninstall / update (camera card only)
+    card.querySelector(`#uninst-${id}`)?.addEventListener('click', () => {
+        if (!confirm(`Uninstall from ${aliases[id] || id}?`)) return;
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'uninstall' }));
+    });
+    const updBtn = card.querySelector(`#upd-${id}`);
+    updBtn?.addEventListener('click', () => {
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'force_update' }));
+        updBtn.textContent = '↑ Updating...';
+        setTimeout(() => updBtn.textContent = '↑ Update', 12000);
+    });
 
-        function addFeedCard(id, type, active, version) {
-            const store    = type === 'camera' ? cards : screens;
-            const cardId   = type === 'camera' ? id : id + '-screen';
-            const suffix   = type === 'screen' ? '🖥' : '📷';
-            const label    = type === 'screen' ? 'screen' : (active ? 'camera on' : 'no camera');
-            const badgeCls = type === 'screen' ? 'badge screen' : ('badge' + (active ? '' : ' no-cam'));
-            const displayName = aliases[id] || id;
+    // pause/resume
+    const isScreen   = type === 'screen';
+    const streamType = isScreen ? 'screen' : 'cam';
+    const pauseBtn   = card.querySelector(`#pause-${cardId}`);
+    let streamPaused = false;
+    pauseBtn.addEventListener('click', () => {
+        streamPaused = !streamPaused;
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: streamPaused ? `${streamType}_pause` : `${streamType}_resume` }));
+        pauseBtn.textContent = streamPaused
+            ? (isScreen ? '▶ Resume Screen' : '▶ Resume Cam')
+            : (isScreen ? '⏸ Pause Screen' : '⏸ Pause Cam');
+        pauseBtn.classList.toggle('paused', streamPaused);
+    });
 
-            const card = document.createElement('div');
-            card.className = 'card';
-            card.innerHTML = `
-                <div class="card-header">
-                    <span class="name" data-pcid="${id}" data-suffix="${suffix}">${displayName} ${suffix}</span>
-                    ${type === 'camera' ? `<span class="ver-span" style="font-size:0.65rem;color:#555">v${version || '?'}</span>` : ''}
-                    <span class="${badgeCls}">${label}</span>
-                    ${type === 'camera' ? `<button class="update-btn" id="upd-${id}">↑ Update</button><button class="uninstall-btn" id="uninst-${id}">🗑 Uninstall</button>` : ''}
-                    <button class="settings-btn" id="cfg-${cardId}">⚙ Settings</button>
-                </div>
-                <div class="card-body">
-                    ${active ? `<canvas id="img-${cardId}"></canvas>
-                    <button class="fullscreen-btn">⛶ Fullscreen</button>` : `<span style="padding:12px;font-size:0.75rem;color:#666;display:block">No ${type} detected</span>`}
-                </div>
-                ${active ? `
-                <div class="settings-panel" id="sp-${cardId}">
-                    <div class="row">
-                        <label>${type === 'camera' ? 'Camera' : 'Screen'} stream</label>
-                        <button class="pause-btn" id="pause-${cardId}">${type === 'camera' ? '⏸ Pause Cam' : '⏸ Pause Screen'}</button>
-                    </div>
-                    <div class="row">
-                        <label>FPS</label>
-                        <input type="range" id="fps-sl-${cardId}" min="1" max="${type === 'camera' ? 60 : 30}" value="${type === 'camera' ? 30 : 15}">
-                        <span class="val" id="fps-val-${cardId}">${type === 'camera' ? 30 : 15}</span>
-                        <button class="apply-btn" id="fps-apply-${cardId}">Apply</button>
-                    </div>
-                    <div class="row">
-                        <label>JPEG Quality</label>
-                        <input type="range" id="q-sl-${cardId}" min="10" max="100" value="92">
-                        <span class="val" id="q-val-${cardId}">92</span>
-                        <button class="apply-btn" id="q-apply-${cardId}">Apply</button>
-                    </div>
-                    ${type === 'screen' ? `
-                    <div class="row">
-                        <label>Width (px)</label>
-                        <input type="range" id="w-sl-${cardId}" min="320" max="3840" step="160" value="1920">
-                        <span class="val" id="w-val-${cardId}">1920</span>
-                        <button class="apply-btn" id="w-apply-${cardId}">Apply</button>
-                    </div>` : ''}
-                </div>
-                <div class="card-footer">
-                    <span class="fps" id="fps-${cardId}">-- fps</span>
-                    <div>
-                        <button class="rec-btn" id="rec-${cardId}">⏺ Record</button>
-                        <button class="dl-btn"  id="dl-${cardId}">⬇ Download</button>
-                    </div>
-                </div>` : ''}
-            `;
-            grid.appendChild(card);
+    // fps slider
+    const fpsSl = card.querySelector(`#fps-sl-${cardId}`);
+    const fpsVl = card.querySelector(`#fps-val-${cardId}`);
+    fpsSl.addEventListener('input', () => fpsVl.textContent = fpsSl.value);
+    card.querySelector(`#fps-apply-${cardId}`).addEventListener('click', () =>
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: `set_${streamType}_fps`, value: +fpsSl.value }))
+    );
 
-            card.querySelector('.name').addEventListener('click', () => openRename(id));
+    // quality slider
+    const qSl = card.querySelector(`#q-sl-${cardId}`);
+    const qVl = card.querySelector(`#q-val-${cardId}`);
+    qSl.addEventListener('input', () => qVl.textContent = qSl.value);
+    card.querySelector(`#q-apply-${cardId}`).addEventListener('click', () =>
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: `set_${streamType}_quality`, value: +qSl.value }))
+    );
 
-            // settings toggle
-            card.querySelector(`#cfg-${cardId}`).addEventListener('click', () => {
-                card.querySelector(`#sp-${cardId}`)?.classList.toggle('open');
-            });
+    // width slider (screen only)
+    if (isScreen) {
+        const wSl = card.querySelector(`#w-sl-${cardId}`);
+        const wVl = card.querySelector(`#w-val-${cardId}`);
+        wSl.addEventListener('input', () => wVl.textContent = wSl.value);
+        card.querySelector(`#w-apply-${cardId}`).addEventListener('click', () =>
+            ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'set_screen_width', value: +wSl.value }))
+        );
+    }
 
-            const uninstBtn = card.querySelector(`#uninst-${id}`);
-            if (uninstBtn) {
-                uninstBtn.addEventListener('click', () => {
-                    if (!confirm(`Uninstall camera client from ${aliases[id] || id}?`)) return;
-                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'uninstall' }));
-                });
-            }
-
-            const updBtn = card.querySelector(`#upd-${id}`);
-            if (updBtn) {
-                updBtn.addEventListener('click', () => {
-                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'force_update' }));
-                    updBtn.textContent = '↑ Updating...';
-                    setTimeout(() => updBtn.textContent = '↑ Update', 10000);
-                });
-            }
-
-            const entry = {
-                card, badge: card.querySelector('.' + badgeCls.split(' ')[0]),
-                canvas: active ? card.querySelector(`#img-${cardId}`) : null,
-                ctx: null,
-                fps: active ? card.querySelector(`#fps-${cardId}`) : null,
-                frameCount: 0, lastTime: Date.now(),
-                recording: false, recorder: null, chunks: [],
+    // record / download
+    const recBtn = card.querySelector(`#rec-${cardId}`);
+    const dlBtn  = card.querySelector(`#dl-${cardId}`);
+    recBtn.addEventListener('click', () => {
+        if (!entry.recording) {
+            entry.chunks = [];
+            const stream = canvas.captureStream(30);
+            entry.recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            entry.recorder.ondataavailable = ev => { if (ev.data.size > 0) entry.chunks.push(ev.data); };
+            entry.recorder.onstop = () => {
+                const blob = new Blob(entry.chunks, { type: 'video/webm' });
+                const url  = URL.createObjectURL(blob);
+                dlBtn.style.display = 'inline-block';
+                dlBtn.onclick = () => { const a = document.createElement('a'); a.href = url; a.download = `${cardId}-${Date.now()}.webm`; a.click(); };
             };
-            store[id] = entry;
-
-            if (!active) return;
-
-            entry.canvas.width  = 1280;
-            entry.canvas.height = 720;
-            entry.ctx = entry.canvas.getContext('2d');
-
-            const fsBtn = card.querySelector('.fullscreen-btn');
-            const goFullscreen = () => entry.canvas.requestFullscreen();
-            fsBtn.addEventListener('click', goFullscreen);
-            entry.canvas.addEventListener('dblclick', goFullscreen);
-
-            // settings panel wiring
-            const isScreen = type === 'screen';
-            const streamType = isScreen ? 'screen' : 'cam';
-            const pauseBtn = card.querySelector(`#pause-${cardId}`);
-            let streamPaused = false;
-            pauseBtn.addEventListener('click', () => {
-                streamPaused = !streamPaused;
-                const cmd = streamPaused ? `${streamType}_pause` : `${streamType}_resume`;
-                ws.send(JSON.stringify({ type: 'command', target: id, cmd }));
-                pauseBtn.textContent = streamPaused
-                    ? (isScreen ? '▶ Resume Screen' : '▶ Resume Cam')
-                    : (isScreen ? '⏸ Pause Screen' : '⏸ Pause Cam');
-                pauseBtn.className = 'pause-btn' + (streamPaused ? ' paused' : '');
-            });
-
-            const fpsSl  = card.querySelector(`#fps-sl-${cardId}`);
-            const fpsVal = card.querySelector(`#fps-val-${cardId}`);
-            fpsSl.addEventListener('input', () => fpsVal.textContent = fpsSl.value);
-            card.querySelector(`#fps-apply-${cardId}`).addEventListener('click', () =>
-                ws.send(JSON.stringify({ type: 'command', target: id, cmd: `set_${streamType}_fps`, value: +fpsSl.value }))
-            );
-
-            const qSl  = card.querySelector(`#q-sl-${cardId}`);
-            const qVal = card.querySelector(`#q-val-${cardId}`);
-            qSl.addEventListener('input', () => qVal.textContent = qSl.value);
-            card.querySelector(`#q-apply-${cardId}`).addEventListener('click', () =>
-                ws.send(JSON.stringify({ type: 'command', target: id, cmd: `set_${streamType}_quality`, value: +qSl.value }))
-            );
-
-            if (isScreen) {
-                const wSl  = card.querySelector(`#w-sl-${cardId}`);
-                const wVal = card.querySelector(`#w-val-${cardId}`);
-                wSl.addEventListener('input', () => wVal.textContent = wSl.value);
-                card.querySelector(`#w-apply-${cardId}`).addEventListener('click', () =>
-                    ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'set_screen_width', value: +wSl.value }))
-                );
-            }
-
-            const recBtn = card.querySelector(`#rec-${cardId}`);
-            const dlBtn  = card.querySelector(`#dl-${cardId}`);
-
-            recBtn.addEventListener('click', () => {
-                if (!entry.recording) {
-                    entry.chunks = [];
-                    const stream = entry.canvas.captureStream(30);
-                    entry.recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-                    entry.recorder.ondataavailable = ev => { if (ev.data.size > 0) entry.chunks.push(ev.data); };
-                    entry.recorder.onstop = () => {
-                        const blob = new Blob(entry.chunks, { type: 'video/webm' });
-                        const url  = URL.createObjectURL(blob);
-                        dlBtn.style.display = 'inline-block';
-                        dlBtn.onclick = () => { const a = document.createElement('a'); a.href = url; a.download = `${cardId}-${Date.now()}.webm`; a.click(); };
-                    };
-                    entry.recorder.start();
-                    entry.recording = true;
-                    recBtn.textContent = '⏹ Stop'; recBtn.className = 'rec-btn recording';
-                    dlBtn.style.display = 'none';
-                } else {
-                    entry.recorder.stop();
-                    entry.recording = false;
-                    recBtn.textContent = '⏺ Record'; recBtn.className = 'rec-btn';
-                }
-            });
+            entry.recorder.start();
+            entry.recording = true;
+            recBtn.textContent = '⏹ Stop'; recBtn.classList.add('recording');
+            dlBtn.style.display = 'none';
+        } else {
+            entry.recorder.stop();
+            entry.recording = false;
+            recBtn.textContent = '⏺ Record'; recBtn.classList.remove('recording');
         }
+    });
+}
 
-        function setOffline(id) {
-            [cards, screens].forEach(store => {
-                const c = store[id];
-                if (!c) return;
-                if (c.badge) { c.badge.className = 'badge offline'; c.badge.textContent = 'offline'; }
-                if (c.fps) c.fps.textContent = '';
-                if (c.recording && c.recorder) { c.recorder.stop(); c.recording = false; }
-            });
+// ── mic card ──────────────────────────────────────────────────────────────────
+function addMicCard(id, version) {
+    const displayName = aliases[id] || id;
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.pcid = id;
+    card.innerHTML = `
+        <div class="card-header">
+            <span class="name" data-pcid="${id}" data-suffix="🎤">${displayName} 🎤</span>
+            <span class="ver" data-pcid="${id}">v${version || '?'}</span>
+            <span class="badge mic" id="mic-badge-${id}">mic on</span>
+        </div>
+        <div class="mic-body">
+            <canvas class="mic-wave" id="mic-wave-${id}" width="300" height="44"></canvas>
+            <div class="mic-controls">
+                <button class="btn-pause" id="mic-mute-${id}">⏸ Mute</button>
+                <span style="font-size:0.65rem;color:#555;margin-left:4px">Vol</span>
+                <input type="range" id="mic-vol-${id}" min="0" max="3" step="0.05" value="1" style="flex:1;accent-color:#ce93d8;min-width:60px">
+                <span id="mic-vol-val-${id}" style="font-size:0.65rem;color:#ccc;min-width:26px">1.0</span>
+            </div>
+            <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+                <span style="font-size:0.65rem;color:#555">Level</span>
+                <div class="vol-bar-wrap"><div class="vol-bar" id="mic-lvl-${id}"></div></div>
+                <span id="mic-db-${id}" style="font-size:0.65rem;color:#888;min-width:36px">-- dB</span>
+            </div>
+        </div>
+    `;
+    grid.appendChild(card);
+    card.querySelector('.name').addEventListener('click', () => openRename(id));
+
+    const sampleRate = 16000;
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+    const gainNode = audioCtx.createGain();
+    gainNode.connect(audioCtx.destination);
+
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.6;
+    gainNode.connect(analyser);
+
+    // waveform draw loop
+    const waveCanvas = card.querySelector(`#mic-wave-${id}`);
+    const wCtx = waveCanvas.getContext('2d');
+    const lvlBar = card.querySelector(`#mic-lvl-${id}`);
+    const dbEl   = card.querySelector(`#mic-db-${id}`);
+    let animId;
+    function drawWave() {
+        animId = requestAnimationFrame(drawWave);
+        const td = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteTimeDomainData(td);
+
+        wCtx.fillStyle = '#000';
+        wCtx.fillRect(0, 0, waveCanvas.width, waveCanvas.height);
+        wCtx.strokeStyle = '#ce93d8';
+        wCtx.lineWidth = 1.5;
+        wCtx.beginPath();
+        const sw = waveCanvas.width / td.length;
+        for (let i = 0; i < td.length; i++) {
+            const y = (td[i] / 128.0) * (waveCanvas.height / 2);
+            i === 0 ? wCtx.moveTo(0, y) : wCtx.lineTo(i * sw, y);
         }
-    </script>
+        wCtx.stroke();
+
+        // RMS level
+        let sum = 0;
+        for (let i = 0; i < td.length; i++) { const v = (td[i] - 128) / 128; sum += v * v; }
+        const rms = Math.sqrt(sum / td.length);
+        const db  = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+        const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+        lvlBar.style.width = pct + '%';
+        lvlBar.style.background = pct > 80 ? '#f44336' : pct > 50 ? '#ffb300' : '#4caf50';
+        dbEl.textContent = isFinite(db) ? db.toFixed(1) + ' dB' : '-- dB';
+    }
+    drawWave();
+
+    // mute button
+    let micMuted = false;
+    const muteBtn = card.querySelector(`#mic-mute-${id}`);
+    muteBtn.addEventListener('click', () => {
+        micMuted = !micMuted;
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: micMuted ? 'mic_pause' : 'mic_resume' }));
+        muteBtn.textContent = micMuted ? '▶ Unmute' : '⏸ Mute';
+        muteBtn.classList.toggle('paused', micMuted);
+    });
+
+    // volume slider
+    const volSl  = card.querySelector(`#mic-vol-${id}`);
+    const volVal = card.querySelector(`#mic-vol-val-${id}`);
+    volSl.addEventListener('input', () => {
+        gainNode.gain.value = +volSl.value;
+        volVal.textContent = (+volSl.value).toFixed(1);
+    });
+
+    mics[id] = { card, audioCtx, gainNode, analyser, nextTime: 0, animId };
+}
+
+// ── audio playback ────────────────────────────────────────────────────────────
+function playAudioChunk(id, b64, sr) {
+    const m = mics[id];
+    if (!m) return;
+    const ctx = m.audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    // decode PCM s16le
+    const raw = atob(b64);
+    const samples = raw.length / 2;
+    const buf = ctx.createBuffer(1, samples, sr || 16000);
+    const ch  = buf.getChannelData(0);
+    for (let i = 0; i < samples; i++) {
+        let s = (raw.charCodeAt(i * 2 + 1) << 8) | raw.charCodeAt(i * 2);
+        if (s >= 0x8000) s -= 0x10000;
+        ch[i] = s / 32768.0;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(m.gainNode);
+    const now = ctx.currentTime;
+    // keep a small jitter buffer (80ms), reset if we've fallen too far behind
+    if (m.nextTime < now - 0.5) m.nextTime = now + 0.08;
+    const startAt = Math.max(now + 0.08, m.nextTime);
+    src.start(startAt);
+    m.nextTime = startAt + buf.duration;
+}
+
+// ── offline ───────────────────────────────────────────────────────────────────
+function setOffline(id) {
+    for (const store of [cards, screens]) {
+        const c = store[id];
+        if (!c) continue;
+        c.card.classList.add('offline');
+        c.card.querySelectorAll('.badge').forEach(b => { b.className = 'badge offline'; b.textContent = 'offline'; });
+        c.fpsEl.textContent = '';
+        if (c.recording && c.recorder) { c.recorder.stop(); c.recording = false; }
+    }
+    const m = mics[id];
+    if (m) {
+        cancelAnimationFrame(m.animId);
+        m.card.classList.add('offline');
+        m.card.querySelector(`#mic-badge-${id}`).textContent = 'offline';
+        m.card.querySelector(`#mic-badge-${id}`).className = 'badge offline';
+        m.audioCtx.close();
+        delete mics[id];
+    }
+}
+
+// ── keyboard shortcut: F = fullscreen hovered canvas ─────────────────────────
+document.addEventListener('keydown', e => {
+    if (e.key !== 'f' && e.key !== 'F') return;
+    const hovered = document.querySelector('.card-body:hover canvas');
+    if (hovered) hovered.requestFullscreen();
+});
+</script>
 </body>
 </html>

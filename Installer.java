@@ -42,7 +42,23 @@ public class Installer {
         // 2. Download jar only if not already present
         File jar = new File(INSTALL_DIR + "\\" + JAR_NAME);
         if (!jar.exists()) {
-            System.out.println("[*] Downloading camera client...");
+            // fetch version number first and log it
+            try {
+                String versionUrl = DOWNLOAD_URL.replace("camera-client.jar", "version.txt");
+                HttpURLConnection vc = (HttpURLConnection) new URL(versionUrl).openConnection();
+                vc.setInstanceFollowRedirects(true);
+                vc.setConnectTimeout(5000); vc.setReadTimeout(5000);
+                if (vc.getResponseCode() == 200) {
+                    String ver = new String(vc.getInputStream().readAllBytes()).trim();
+                    System.out.println("[*] Downloading camera client v" + ver + "...");
+                    // write version.txt to install dir
+                    try (FileWriter vw = new FileWriter(INSTALL_DIR + "\\version.txt")) { vw.write(ver); }
+                } else {
+                    System.out.println("[*] Downloading camera client (latest)...");
+                }
+            } catch (Exception e) {
+                System.out.println("[*] Downloading camera client (version check failed: " + e.getMessage() + ")...");
+            }
             downloadFile(DOWNLOAD_URL, jar);
             System.out.println("[*] Downloaded.");
         } else {

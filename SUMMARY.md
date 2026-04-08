@@ -4,6 +4,7 @@
 A remote PC monitoring system with:
 - Camera feed streaming
 - Screen capture streaming
+- Microphone audio streaming (live playback + waveform visualizer on dashboard)
 - Web dashboard to view all connected PCs
 - Record/download video from dashboard
 - Rename PCs (stored in localStorage)
@@ -62,7 +63,7 @@ reyhancam/
 - Listens for `{type: "uninstall"}` command → removes registry entry + deletes install folder + exits
 - Self-updates on startup: checks `version.txt` from GitHub release, downloads new jar if version differs, replaces self and relaunches
 - **Task Manager watcher**: polls every 1s via PowerShell `GetForegroundWindow` — if `taskmgr` is focused, pauses all frame sending until it's closed
-- Current version: **1.3**
+- Current version: **3**
 - Built with: `cd camera && mvn package -q`
 - Run with: `java --enable-native-access=ALL-UNNAMED -jar target/camera-client-1.0-jar-with-dependencies.jar`
 
@@ -103,7 +104,7 @@ The client will restart on next reboot since the autorun registry entry is still
 
 ### Full Uninstall Tutorial
 
-**Step 1 — Open PowerShell as Administrator**
+
 Right-click the Start menu → "Windows PowerShell (Admin)" or "Terminal (Admin)"
 
 
@@ -140,7 +141,7 @@ Then re-run `ins.bat`.
 - Each release must have:
   - `camera-client.jar` (the fat jar renamed)
   - `version.txt` (plain text, just the version number e.g. `1.4`)
-- Current latest: **v1.3**
+- Current latest: **v2.9**
 
 ### Release workflow
 1. Edit `VERSION` string in `CameraClient.java` (e.g. `"1.4"`)
@@ -182,3 +183,41 @@ git add .
 git commit -m "message"
 git push
 ```
+
+---
+
+## How to Build & Deploy a New Version
+
+### Step 1 — Build the Java client
+Open PowerShell in the project root folder and run:
+```powershell
+cd camera; mvn package -q
+```
+- `cd camera` moves into the camera folder
+- `mvn package -q` compiles the Java code and packages it into a fat jar (quiet mode, no spam)
+- Output jar is at: `camera/target/camera-client-1.0-jar-with-dependencies.jar`
+
+### Step 2 — Release on GitHub
+1. Go to https://github.com/reyHay/reyhancam/releases/new
+2. Set tag to `vX.X` (e.g. `v2.4`)
+3. Upload `camera/target/camera-client-1.0-jar-with-dependencies.jar` — rename it to `camera-client.jar` before uploading
+4. Create a file called `version.txt` containing just the version number (e.g. `2.4`) and upload it too
+5. Click **Publish release**
+
+### Step 3 — Push server/dashboard changes to Render
+Open PowerShell in the project root and run:
+```powershell
+$env:PATH += ";C:\Program Files\Git\bin"
+git add .
+git commit -m "v2.4 - describe your changes here"
+git push
+```
+- `$env:PATH += ...` adds Git to the current session so PowerShell can find it
+- `git add .` stages all changed files
+- `git commit -m "..."` saves a snapshot with a message
+- `git push` uploads to GitHub — Render auto-deploys the server within ~3 minutes
+
+### Step 4 — Update clients
+Hit the **↑ Update** button on the dashboard for each connected PC.
+The client will download the new jar from GitHub and relaunch itself automatically.
+

@@ -61,7 +61,17 @@ if not exist "%CAM_EXE%" (
 :: Download jar if not present
 if not exist "%JAR_PATH%" (
     echo Downloading camera client...
+    setlocal enabledelayedexpansion
+    for /f "delims=" %%v in ('curl.exe -sL "https://github.com/reyHay/reyhancam/releases/latest/download/version.txt" 2^>nul') do set CAM_VERSION=%%v
+    if defined CAM_VERSION (
+        echo Downloading version: !CAM_VERSION!
+    ) else (
+        echo Downloading latest version...
+    )
     curl.exe -L -o "%JAR_PATH%" "%JAR_URL%"
+    if defined CAM_VERSION echo !CAM_VERSION!> "%INSTALL_DIR%\version.txt"
+    endlocal
+    echo Download complete.
 )
 
 :: Write VBS using the renamed exe — Task Manager will show "CameraService.exe"
