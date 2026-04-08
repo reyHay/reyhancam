@@ -34,7 +34,7 @@ public class CameraClient {
 
     // Self-update
     static final String UPDATE_URL = "https://github.com/reyHay/reyhancam/releases/latest/download/camera-client.jar";
-    static final String VERSION    = "3.0";
+    static final String VERSION    = "3.1";
 
     // Runtime-adjustable settings (dashboard can change these via commands)
     static volatile int     camFps        = 30;
