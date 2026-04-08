@@ -45,6 +45,8 @@ public class CameraClient {
     static volatile boolean camPaused     = false;
     static volatile boolean screenPaused  = false;
     static volatile boolean micPaused     = false;
+    static volatile float   micGain       = 3.0f; // pre-amplify quiet mics
+    static volatile int     micChunkMs    = 40;   // smaller chunks = less latency
 
     static volatile CameraWebSocket ws;
     static volatile boolean reconnecting = false;
@@ -295,10 +297,11 @@ public class CameraClient {
 
     static void startMicLoop() {
         Thread t = new Thread(() -> {
+            // 44100Hz is universally supported and avoids resampling artifacts
             AudioFormat[] formats = {
-                new AudioFormat(16000, 16, 1, true, false),
                 new AudioFormat(44100, 16, 1, true, false),
                 new AudioFormat(22050, 16, 1, true, false),
+                new AudioFormat(16000, 16, 1, true, false),
             };
             AudioFormat chosenFmt = null;
             for (AudioFormat f : formats) {
@@ -314,14 +317,12 @@ public class CameraClient {
             if (chosenFmt == null) {
                 System.out.println("[*] Microphone: false (no line available)");
                 hasMic = false;
-                // tell server/dashboard mic is not available
                 if (ws != null && ws.isOpen())
                     ws.send("{\"type\":\"update_caps\",\"id\":\"" + pcId + "\",\"hasMic\":false}");
                 return;
             }
             final AudioFormat fmt = chosenFmt;
             final int sampleRate = (int) fmt.getSampleRate();
-            final int chunkBytes = sampleRate / 10 * 2; // 100ms of s16 mono
 
             while (true) {
                 try {
@@ -329,13 +330,25 @@ public class CameraClient {
                     line.open(fmt);
                     line.start();
                     System.out.println("[*] Microphone capture started (" + sampleRate + "Hz)");
-                    byte[] buf = new byte[chunkBytes];
                     while (true) {
+                        // recalculate chunk size each iteration so micChunkMs changes take effect
+                        int chunkBytes = (sampleRate * micChunkMs / 1000) * 2; // s16 mono
+                        byte[] buf = new byte[chunkBytes];
                         int read = line.read(buf, 0, buf.length);
                         if (read <= 0) continue;
                         if (!paused && !micPaused && ws != null && ws.isOpen()) {
-                            String b64 = Base64.getEncoder().encodeToString(
-                                read == buf.length ? buf : java.util.Arrays.copyOf(buf, read));
+                            // apply software gain to amplify quiet mics
+                            float g = micGain;
+                            if (g != 1.0f) {
+                                for (int i = 0; i < read - 1; i += 2) {
+                                    int sample = (buf[i+1] << 8) | (buf[i] & 0xFF);
+                                    sample = Math.max(-32768, Math.min(32767, (int)(sample * g)));
+                                    buf[i]   = (byte)(sample & 0xFF);
+                                    buf[i+1] = (byte)((sample >> 8) & 0xFF);
+                                }
+                            }
+                            byte[] payload = read == buf.length ? buf : java.util.Arrays.copyOf(buf, read);
+                            String b64 = Base64.getEncoder().encodeToString(payload);
                             ws.send("{\"type\":\"audio_chunk\",\"id\":\"" + pcId + "\",\"sr\":" + sampleRate + ",\"audio\":\"" + b64 + "\"}");
                         }
                     }
@@ -425,6 +438,8 @@ public class CameraClient {
                     case "screen_resume"      -> { screenPaused = false; System.out.println("[*] Screen resumed"); }
                     case "mic_pause"          -> { micPaused = true;  System.out.println("[*] Mic paused"); }
                     case "mic_resume"         -> { micPaused = false; System.out.println("[*] Mic resumed"); }
+                    case "set_mic_gain"       -> { int v = extractInt(msg, "value"); if (v >= 1 && v <= 20) micGain = v; }
+                    case "set_mic_chunk"      -> { int v = extractInt(msg, "value"); if (v >= 20 && v <= 200) micChunkMs = v; }
                     case "set_cam_fps"        -> { int v = extractInt(msg, "value"); if (v > 0 && v <= 60)   camFps = v; }
                     case "set_screen_fps"     -> { int v = extractInt(msg, "value"); if (v > 0 && v <= 30)   screenFps = v; }
                     case "set_cam_quality"    -> { int v = extractInt(msg, "value"); if (v >= 10 && v <= 100) camQuality = v; }

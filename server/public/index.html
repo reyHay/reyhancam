@@ -434,13 +434,14 @@ function addMicCard(id, version) {
             <span class="name" data-pcid="${id}" data-suffix="🎤">${displayName} 🎤</span>
             <span class="ver" data-pcid="${id}">v${version || '?'}</span>
             <span class="badge mic" id="mic-badge-${id}">mic on</span>
+            <button class="btn btn-cfg" id="mic-cfg-${id}">⚙</button>
         </div>
         <div class="mic-body">
             <canvas class="mic-wave" id="mic-wave-${id}" width="300" height="44"></canvas>
             <div class="mic-controls">
                 <button class="btn-pause" id="mic-mute-${id}">⏸ Mute</button>
                 <span style="font-size:0.65rem;color:#555;margin-left:4px">Vol</span>
-                <input type="range" id="mic-vol-${id}" min="0" max="3" step="0.05" value="1" style="flex:1;accent-color:#ce93d8;min-width:60px">
+                <input type="range" id="mic-vol-${id}" min="0" max="5" step="0.1" value="1" style="flex:1;accent-color:#ce93d8;min-width:60px">
                 <span id="mic-vol-val-${id}" style="font-size:0.65rem;color:#ccc;min-width:26px">1.0</span>
             </div>
             <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
@@ -449,21 +450,46 @@ function addMicCard(id, version) {
                 <span id="mic-db-${id}" style="font-size:0.65rem;color:#888;min-width:36px">-- dB</span>
             </div>
         </div>
+        <div class="settings-panel" id="mic-sp-${id}">
+            <div class="sp-row">
+                <label>Mic Gain (server)</label>
+                <input type="range" id="mic-gain-sl-${id}" min="1" max="20" step="1" value="3">
+                <span class="sp-val" id="mic-gain-val-${id}">3x</span>
+                <button class="btn-apply" id="mic-gain-apply-${id}">Apply</button>
+            </div>
+            <div class="sp-row">
+                <label>Chunk (ms)</label>
+                <input type="range" id="mic-chunk-sl-${id}" min="20" max="200" step="10" value="40">
+                <span class="sp-val" id="mic-chunk-val-${id}">40ms</span>
+                <button class="btn-apply" id="mic-chunk-apply-${id}">Apply</button>
+            </div>
+        </div>
+        <div class="card-footer">
+            <span class="fps-label" id="mic-kbps-${id}"></span>
+            <div class="btn-row">
+                <button class="btn btn-rec" id="mic-rec-${id}">⏺ Record</button>
+                <button class="btn btn-dl"  id="mic-dl-${id}">⬇ Download</button>
+            </div>
+        </div>
     `;
     grid.appendChild(card);
     card.querySelector('.name').addEventListener('click', () => openRename(id));
 
-    const sampleRate = 16000;
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+    // Use browser's native sample rate to avoid resampling
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const gainNode = audioCtx.createGain();
+
+    // MediaStreamDestination for recording
+    const recDest = audioCtx.createMediaStreamDestination();
     gainNode.connect(audioCtx.destination);
+    gainNode.connect(recDest);
 
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.6;
+    analyser.smoothingTimeConstant = 0.5;
     gainNode.connect(analyser);
 
-    // waveform draw loop
+    // waveform
     const waveCanvas = card.querySelector(`#mic-wave-${id}`);
     const wCtx = waveCanvas.getContext('2d');
     const lvlBar = card.querySelector(`#mic-lvl-${id}`);
@@ -473,7 +499,6 @@ function addMicCard(id, version) {
         animId = requestAnimationFrame(drawWave);
         const td = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(td);
-
         wCtx.fillStyle = '#000';
         wCtx.fillRect(0, 0, waveCanvas.width, waveCanvas.height);
         wCtx.strokeStyle = '#ce93d8';
@@ -485,8 +510,7 @@ function addMicCard(id, version) {
             i === 0 ? wCtx.moveTo(0, y) : wCtx.lineTo(i * sw, y);
         }
         wCtx.stroke();
-
-        // RMS level
+        // RMS dB meter
         let sum = 0;
         for (let i = 0; i < td.length; i++) { const v = (td[i] - 128) / 128; sum += v * v; }
         const rms = Math.sqrt(sum / td.length);
@@ -498,7 +522,28 @@ function addMicCard(id, version) {
     }
     drawWave();
 
-    // mute button
+    // settings toggle
+    card.querySelector(`#mic-cfg-${id}`).addEventListener('click', () =>
+        card.querySelector(`#mic-sp-${id}`).classList.toggle('open')
+    );
+
+    // server-side gain
+    const gainSl  = card.querySelector(`#mic-gain-sl-${id}`);
+    const gainVal = card.querySelector(`#mic-gain-val-${id}`);
+    gainSl.addEventListener('input', () => gainVal.textContent = gainSl.value + 'x');
+    card.querySelector(`#mic-gain-apply-${id}`).addEventListener('click', () =>
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'set_mic_gain', value: +gainSl.value }))
+    );
+
+    // chunk size
+    const chunkSl  = card.querySelector(`#mic-chunk-sl-${id}`);
+    const chunkVal = card.querySelector(`#mic-chunk-val-${id}`);
+    chunkSl.addEventListener('input', () => chunkVal.textContent = chunkSl.value + 'ms');
+    card.querySelector(`#mic-chunk-apply-${id}`).addEventListener('click', () =>
+        ws.send(JSON.stringify({ type: 'command', target: id, cmd: 'set_mic_chunk', value: +chunkSl.value }))
+    );
+
+    // mute
     let micMuted = false;
     const muteBtn = card.querySelector(`#mic-mute-${id}`);
     muteBtn.addEventListener('click', () => {
@@ -508,12 +553,38 @@ function addMicCard(id, version) {
         muteBtn.classList.toggle('paused', micMuted);
     });
 
-    // volume slider
+    // client-side volume
     const volSl  = card.querySelector(`#mic-vol-${id}`);
     const volVal = card.querySelector(`#mic-vol-val-${id}`);
     volSl.addEventListener('input', () => {
         gainNode.gain.value = +volSl.value;
         volVal.textContent = (+volSl.value).toFixed(1);
+    });
+
+    // recording
+    const recBtn = card.querySelector(`#mic-rec-${id}`);
+    const dlBtn  = card.querySelector(`#mic-dl-${id}`);
+    let recorder = null, recChunks = [], recording = false;
+    recBtn.addEventListener('click', () => {
+        if (!recording) {
+            recChunks = [];
+            recorder = new MediaRecorder(recDest.stream);
+            recorder.ondataavailable = ev => { if (ev.data.size > 0) recChunks.push(ev.data); };
+            recorder.onstop = () => {
+                const blob = new Blob(recChunks, { type: 'audio/webm' });
+                const url  = URL.createObjectURL(blob);
+                dlBtn.style.display = 'inline-block';
+                dlBtn.onclick = () => { const a = document.createElement('a'); a.href = url; a.download = `mic-${id}-${Date.now()}.webm`; a.click(); };
+            };
+            recorder.start();
+            recording = true;
+            recBtn.textContent = '⏹ Stop'; recBtn.classList.add('recording');
+            dlBtn.style.display = 'none';
+        } else {
+            recorder.stop();
+            recording = false;
+            recBtn.textContent = '⏺ Record'; recBtn.classList.remove('recording');
+        }
     });
 
     mics[id] = { card, audioCtx, gainNode, analyser, nextTime: 0, animId };
@@ -529,7 +600,8 @@ function playAudioChunk(id, b64, sr) {
     // decode PCM s16le
     const raw = atob(b64);
     const samples = raw.length / 2;
-    const buf = ctx.createBuffer(1, samples, sr || 16000);
+    // create buffer at the incoming sample rate; browser resamples to ctx.sampleRate automatically
+    const buf = ctx.createBuffer(1, samples, sr || 44100);
     const ch  = buf.getChannelData(0);
     for (let i = 0; i < samples; i++) {
         let s = (raw.charCodeAt(i * 2 + 1) << 8) | raw.charCodeAt(i * 2);
@@ -540,12 +612,12 @@ function playAudioChunk(id, b64, sr) {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(m.gainNode);
+
     const now = ctx.currentTime;
-    // keep a small jitter buffer (80ms), reset if we've fallen too far behind
-    if (m.nextTime < now - 0.5) m.nextTime = now + 0.08;
-    const startAt = Math.max(now + 0.08, m.nextTime);
-    src.start(startAt);
-    m.nextTime = startAt + buf.duration;
+    // if nextTime is in the past or too far ahead, reset to now (no delay buildup)
+    if (m.nextTime < now || m.nextTime > now + 0.3) m.nextTime = now;
+    src.start(m.nextTime);
+    m.nextTime += buf.duration;
 }
 
 // ── offline ───────────────────────────────────────────────────────────────────
